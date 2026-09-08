@@ -1,0 +1,22 @@
+{
+  "name": "dicom-cloud-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.658.0",
+    "@aws-sdk/s3-request-presigner": "^3.658.0",
+    "@cornerstonejs/core": "^1.77.0",
+    "@cornerstonejs/tools": "^1.77.0",
+    "@cornerstonejs/dicom-image-loader": "^1.77.0",
+    "dicom-parser": "^1.8.21"
+  },
+  "devDependencies": {
+    "vite": "^5.4.8"
+  }
+}
