@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DICOM Cloud Viewer</title>
+    <link rel="stylesheet" href="/src/style.css" />
+
+    <!-- Cornerstone v2 stack from CDN (drop-in, no bundler) -->
+    <script src="https://unpkg.com/dicom-parser@1.8.21/dist/dicomParser.min.js"></script>
+    <script src="https://unpkg.com/cornerstone-core@2.6.1/dist/cornerstone.min.js"></script>
+    <script src="https://unpkg.com/cornerstone-math@0.1.10/dist/cornerstoneMath.min.js"></script>
+    <script src="https://unpkg.com/hammerjs@2.0.8/hammer.min.js"></script>
+    <script src="https://unpkg.com/cornerstone-tools@6.0.10/dist/cornerstoneTools.min.js"></script>
+    <script src="https://unpkg.com/cornerstone-wado-image-loader@4.13.2/dist/cornerstoneWADOImageLoader.bundle.min.js"></script>
+  </head>
+  <body>
+    <div id="app">
+      <div id="gate" class="gate">
+        <div class="gate-card">
+          <h1>DICOM Cloud Viewer</h1>
+          <p class="muted">Session 1b — Viewer</p>
+          <input
+            type="password"
+            id="passwordInput"
+            placeholder="Access password"
+            autocomplete="current-password"
+          />
+          <button id="loginBtn">Enter</button>
+          <p id="passwordError" class="error hidden">Incorrect password</p>
+        </div>
+      </div>
+
+      <div id="main" class="hidden">
+        <header>
+          <h1>DICOM Cloud Viewer</h1>
+          <nav>
+            <button id="navStudies" class="link">Studies</button>
+            <button id="navUpload" class="link">Upload</button>
+            <button id="logoutBtn" class="link">Log out</button>
+          </nav>
+        </header>
+
+        <main>
+          <section id="studiesView">
+            <h2>Studies</h2>
+            <p class="muted">Click a study to view.</p>
+            <div id="studiesList" class="studies-list"></div>
+          </section>
+
+          <section id="uploadView" class="hidden">
+            <h2>Upload DICOM Files</h2>
+            <div class="warning">
+              <strong>Session 1b:</strong> no de-identification yet. Upload test/anonymised data only.
+            </div>
+
+            <div class="upload-card">
+              <input type="file" id="fileInput" multiple />
+              <label class="folder-toggle">
+                <input type="checkbox" id="folderMode" />
+                Upload entire folder (desktop browsers only)
+              </label>
+              <button id="uploadBtn">Start Upload</button>
+            </div>
+
+            <div id="uploadStatus" class="upload-log hidden"></div>
+          </section>
+
+          <section id="viewerView" class="hidden viewer-section">
+            <div class="viewer-header">
+              <div>
+                <h2 id="viewerTitle">Loading...</h2>
+                <div class="viewer-info-row">
+                  <span id="viewerInfo" class="muted"></span>
+                  <span id="viewerProgress" class="muted"></span>
+                </div>
+              </div>
+            </div>
+            <div class="viewport-container">
+              <div id="dicomViewport" class="dicom-viewport" tabindex="0"></div>
+            </div>
+            <div class="viewer-controls">
+              <div><strong>Mouse wheel:</strong> scroll slices</div>
+              <div><strong>Left drag:</strong> window / level (brightness &amp; contrast)</div>
+              <div><strong>Middle drag:</strong> pan</div>
+              <div><strong>Right drag:</strong> zoom</div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
