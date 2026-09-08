@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DICOM Cloud Viewer</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- Password gate -->
+      <div id="gate" class="gate">
+        <div class="gate-card">
+          <h1>DICOM Cloud Viewer</h1>
+          <p class="muted">Session 1a — Foundation</p>
+          <input
+            type="password"
+            id="passwordInput"
+            placeholder="Access password"
+            autocomplete="current-password"
+          />
+          <button id="loginBtn">Enter</button>
+          <p id="passwordError" class="error hidden">Incorrect password</p>
+        </div>
+      </div>
+
+      <!-- Main app (hidden until authed) -->
+      <div id="main" class="hidden">
+        <header>
+          <h1>DICOM Cloud Viewer</h1>
+          <button id="logoutBtn" class="link">Log out</button>
+        </header>
+        <main>
+          <div class="success-card">
+            <h2>✓ Foundation ready</h2>
+            <p>Your cloud environment is fully wired up:</p>
+            <ul>
+              <li>Cloudflare R2 bucket connected</li>
+              <li>Vercel deployment live</li>
+              <li>Password gate working</li>
+              <li>Serverless functions responding</li>
+            </ul>
+            <p class="muted">
+              Next: Session 1b will add the DICOM upload UI and Cornerstone3D viewer.
+            </p>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
