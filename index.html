@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DICOM Cloud Viewer</title>
+    <link rel="stylesheet" href="/src/style.css" />
+    <script src="https://unpkg.com/dicom-parser@1.8.21/dist/dicomParser.min.js"></script>
+  </head>
+  <body>
+    <div id="app">
+      <div id="gate" class="gate">
+        <div class="gate-card">
+          <h1>DICOM Cloud Viewer</h1>
+          <p class="muted">Session 1b — Upload</p>
+          <input
+            type="password"
+            id="passwordInput"
+            placeholder="Access password"
+            autocomplete="current-password"
+          />
+          <button id="loginBtn">Enter</button>
+          <p id="passwordError" class="error hidden">Incorrect password</p>
+        </div>
+      </div>
+
+      <div id="main" class="hidden">
+        <header>
+          <h1>DICOM Cloud Viewer</h1>
+          <nav>
+            <button id="navStudies" class="link">Studies</button>
+            <button id="navUpload" class="link">Upload</button>
+            <button id="logoutBtn" class="link">Log out</button>
+          </nav>
+        </header>
+
+        <main>
+          <section id="studiesView">
+            <h2>Studies</h2>
+            <div id="studiesList" class="studies-list">
+              <div class="muted">Loading...</div>
+            </div>
+          </section>
+
+          <section id="uploadView" class="hidden">
+            <h2>Upload DICOM Files</h2>
+            <div class="warning">
+              <strong>Session 1b:</strong> no de-identification yet. Upload test/anonymised data only.
+            </div>
+
+            <div class="upload-card">
+              <input type="file" id="fileInput" multiple />
+              <label class="folder-toggle">
+                <input type="checkbox" id="folderMode" />
+                Upload entire folder (desktop browsers only)
+              </label>
+              <button id="uploadBtn">Start Upload</button>
+            </div>
+
+            <div id="uploadStatus" class="upload-log hidden"></div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
