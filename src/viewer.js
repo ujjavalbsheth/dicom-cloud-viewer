@@ -1,9 +1,18 @@
 // ============================================================
-// Cornerstone3D v3 Stack Viewer
-// Migrated from CDN Cornerstone v2 to npm-bundled Cornerstone3D
+// Cornerstone3D v3 — Volume Viewer (Session 2b)
+// Loads all instances as a true 3D volume, displays AXIAL orientation
+// This is the foundation Session 2c will use to add MPR viewports
 // ============================================================
 
-import { init as coreInit, RenderingEngine, Enums, imageLoader, metaData } from '@cornerstonejs/core';
+import {
+  init as coreInit,
+  RenderingEngine,
+  Enums,
+  imageLoader,
+  volumeLoader,
+  setVolumesForViewports,
+  cache,
+} from '@cornerstonejs/core';
 import {
   init as toolsInit,
   addTool,
@@ -18,16 +27,21 @@ import {
 } from '@cornerstonejs/tools';
 import * as cornerstoneDICOMImageLoader from '@cornerstonejs/dicom-image-loader';
 
-const { ViewportType } = Enums;
+const { ViewportType, OrientationAxis } = Enums;
 const { MouseBindings } = ToolEnums;
 
 const RENDERING_ENGINE_ID = 'dicomRenderingEngine';
-const TOOL_GROUP_ID = 'STACK_TOOL_GROUP';
-const VIEWPORT_ID = 'CT_STACK';
+const TOOL_GROUP_ID = 'VOLUME_TOOL_GROUP';
+const VIEWPORT_ID = 'CT_AXIAL';
+
+// The volumeId MUST start with 'cornerstoneStreamingImageVolume:'
+// This tells Cornerstone to use the streaming volume loader
+const VOLUME_ID_PREFIX = 'cornerstoneStreamingImageVolume:';
 
 let initialized = false;
 let renderingEngine = null;
 let toolGroup = null;
+let currentVolumeId = null;
 let currentImageIds = [];
 let currentViewport = null;
 let currentElement = null;
@@ -39,16 +53,13 @@ let currentElement = null;
 export async function initViewer() {
   if (initialized) return;
 
-  // Core init
   await coreInit();
   await toolsInit();
 
-  // DICOM image loader init — new v3 API
   cornerstoneDICOMImageLoader.init({
     maxWebWorkers: Math.max(1, (navigator.hardwareConcurrency || 4) - 1),
   });
 
-  // Register tools once (not per-study)
   addTool(WindowLevelTool);
   addTool(PanTool);
   addTool(ZoomTool);
@@ -60,36 +71,35 @@ export async function initViewer() {
 }
 
 // ============================================================
-// Load a study into the viewer
+// Load a study as a 3D volume
 // ============================================================
 
 /**
  * @param {HTMLElement} element - The div container
  * @param {Array<{url: string}>} instances - Signed URLs for each DICOM instance
- * @param {(loaded, total) => void} onProgress - Prefetch progress callback
- * @param {(idx) => void} onSliceChange - Called when the current slice changes
+ * @param {(loaded, total) => void} onVolumeProgress - Reports slice-load progress
+ * @param {(idx) => void} onSliceChange - Called when the axial slice changes
  * @param {(viewport) => void} onRender - Called after each render (for W/L overlay)
- * @returns {Promise<{viewport, imageIds}>}
  */
-export async function loadStudy(element, instances, onProgress, onSliceChange, onRender) {
-  if (!initialized) {
-    throw new Error('Call initViewer() first');
-  }
+export async function loadStudy(element, instances, onVolumeProgress, onSliceChange, onRender) {
+  if (!initialized) throw new Error('Call initViewer() first');
 
-  // Clean up any previous viewport
   cleanup();
 
   currentElement = element;
   currentImageIds = instances.map((inst) => `wadouri:${inst.url}`);
+  currentVolumeId = VOLUME_ID_PREFIX + 'STUDY_' + Date.now();
 
   // Create rendering engine
   renderingEngine = new RenderingEngine(RENDERING_ENGINE_ID);
 
+  // Create an ORTHOGRAPHIC viewport (volume viewport with axial orientation)
   const viewportInput = {
     viewportId: VIEWPORT_ID,
-    type: ViewportType.STACK,
+    type: ViewportType.ORTHOGRAPHIC,
     element,
     defaultOptions: {
+      orientation: OrientationAxis.AXIAL,
       background: [0, 0, 0],
     },
   };
@@ -97,14 +107,12 @@ export async function loadStudy(element, instances, onProgress, onSliceChange, o
   renderingEngine.enableElement(viewportInput);
   currentViewport = renderingEngine.getViewport(VIEWPORT_ID);
 
-  // Create tool group (destroy old one first if exists)
+  // Create/setup tool group
   try {
     ToolGroupManager.destroyToolGroup(TOOL_GROUP_ID);
   } catch (e) {}
-
   toolGroup = ToolGroupManager.createToolGroup(TOOL_GROUP_ID);
 
-  // Add all tools to the group
   toolGroup.addTool(WindowLevelTool.toolName);
   toolGroup.addTool(PanTool.toolName);
   toolGroup.addTool(ZoomTool.toolName);
@@ -112,12 +120,9 @@ export async function loadStudy(element, instances, onProgress, onSliceChange, o
   toolGroup.addTool(LengthTool.toolName);
   toolGroup.addTool(AngleTool.toolName);
 
-  // Attach viewport
   toolGroup.addViewport(VIEWPORT_ID, RENDERING_ENGINE_ID);
 
-  // Set default active tools:
-  // Primary (left) = WindowLevel; Middle = Pan; Secondary (right) = Zoom
-  // Mouse wheel is always StackScroll
+  // Default active tools
   toolGroup.setToolActive(WindowLevelTool.toolName, {
     bindings: [{ mouseButton: MouseBindings.Primary }],
   });
@@ -131,59 +136,57 @@ export async function loadStudy(element, instances, onProgress, onSliceChange, o
     bindings: [{ mouseButton: MouseBindings.Wheel }],
   });
 
-  // Load and display the first image (this triggers download of first slice)
-  await currentViewport.setStack(currentImageIds, 0);
-  currentViewport.render();
+  // Create the volume — this pre-allocates memory and starts metadata fetch
+  const volume = await volumeLoader.createAndCacheVolume(currentVolumeId, {
+    imageIds: currentImageIds,
+  });
 
-  // Wire up slice change event
-  const handleSliceChange = () => {
-    const idx = currentViewport.getCurrentImageIdIndex();
-    if (onSliceChange) onSliceChange(idx);
-  };
-  element.addEventListener(Enums.Events.STACK_NEW_IMAGE, handleSliceChange);
-
-  // Wire up render event for W/L overlay
-  if (onRender) {
-    element.addEventListener(Enums.Events.IMAGE_RENDERED, () => {
-      try {
-        onRender(currentViewport);
-      } catch (e) {}
+  // Report progress as slices load into the volume
+  if (onVolumeProgress) {
+    onVolumeProgress(0, currentImageIds.length);
+    let loaded = 0;
+    element.addEventListener(Enums.Events.IMAGE_LOADED, () => {
+      loaded++;
+      if (loaded <= currentImageIds.length) {
+        onVolumeProgress(loaded, currentImageIds.length);
+      }
     });
   }
 
-  // Prefetch remaining slices in background
-  prefetchSlices(currentImageIds, onProgress);
+  // Start loading pixel data (progressive)
+  volume.load();
+
+  // Attach volume to viewport
+  await setVolumesForViewports(
+    renderingEngine,
+    [{ volumeId: currentVolumeId }],
+    [VIEWPORT_ID]
+  );
+
+  currentViewport.render();
+
+  // Slice change event
+  element.addEventListener(Enums.Events.CAMERA_MODIFIED, () => {
+    if (onSliceChange) {
+      try {
+        const idx = currentViewport.getCurrentImageIdIndex();
+        onSliceChange(idx);
+      } catch (e) {}
+    }
+  });
+
+  // Render event — updates W/L overlay
+  if (onRender) {
+    element.addEventListener(Enums.Events.IMAGE_RENDERED, () => {
+      try { onRender(currentViewport); } catch (e) {}
+    });
+  }
 
   return { viewport: currentViewport, imageIds: currentImageIds };
 }
 
-async function prefetchSlices(imageIds, onProgress) {
-  const total = imageIds.length;
-  let loaded = 1; // first one already loading
-  if (onProgress) onProgress(loaded, total);
-
-  const CONCURRENCY = 6;
-  let cursor = 1;
-
-  async function worker() {
-    while (cursor < total) {
-      const i = cursor++;
-      try {
-        await imageLoader.loadAndCacheImage(imageIds[i]);
-      } catch (e) {
-        // skip failed slice
-      }
-      loaded++;
-      if (onProgress && loaded % 5 === 0) onProgress(loaded, total);
-    }
-  }
-
-  await Promise.all(Array(CONCURRENCY).fill(0).map(worker));
-  if (onProgress) onProgress(total, total);
-}
-
 // ============================================================
-// Tool switching (for the toolbar buttons)
+// Tool switching (toolbar buttons)
 // ============================================================
 
 const DRAG_TOOLS = ['WindowLevel', 'Pan', 'Zoom', 'StackScroll', 'Length', 'Angle'];
@@ -191,19 +194,14 @@ const DRAG_TOOLS = ['WindowLevel', 'Pan', 'Zoom', 'StackScroll', 'Length', 'Angl
 export function setActiveTool(toolName) {
   if (!toolGroup) return;
 
-  // Deactivate all drag tools on the primary mouse button
   DRAG_TOOLS.forEach((name) => {
-    try {
-      toolGroup.setToolPassive(name);
-    } catch (e) {}
+    try { toolGroup.setToolPassive(name); } catch (e) {}
   });
 
-  // Activate the selected tool on primary mouse button
   toolGroup.setToolActive(toolName, {
     bindings: [{ mouseButton: MouseBindings.Primary }],
   });
 
-  // Keep middle-drag = pan, right-drag = zoom, wheel = scroll always active
   toolGroup.setToolActive(PanTool.toolName, {
     bindings: [{ mouseButton: MouseBindings.Auxiliary }],
   });
@@ -216,29 +214,31 @@ export function setActiveTool(toolName) {
 }
 
 // ============================================================
-// Transform actions (rotate, flip, invert, reset)
+// Transform actions
 // ============================================================
 
 export function rotateViewport() {
   if (!currentViewport) return;
-  const rotation = (currentViewport.getRotation() + 90) % 360;
-  currentViewport.setViewPresentation({ rotation });
-  currentViewport.render();
+  try {
+    const rotation = ((currentViewport.getRotation ? currentViewport.getRotation() : 0) + 90) % 360;
+    currentViewport.setViewPresentation({ rotation });
+    currentViewport.render();
+  } catch (e) {
+    console.warn('Rotate not supported on this viewport type:', e.message);
+  }
 }
 
 export function flipH() {
   if (!currentViewport) return;
   const camera = currentViewport.getCamera();
-  const flip = { flipHorizontal: !camera.flipHorizontal };
-  currentViewport.setCamera({ ...camera, ...flip });
+  currentViewport.setCamera({ ...camera, flipHorizontal: !camera.flipHorizontal });
   currentViewport.render();
 }
 
 export function flipV() {
   if (!currentViewport) return;
   const camera = currentViewport.getCamera();
-  const flip = { flipVertical: !camera.flipVertical };
-  currentViewport.setCamera({ ...camera, ...flip });
+  currentViewport.setCamera({ ...camera, flipVertical: !camera.flipVertical });
   currentViewport.render();
 }
 
@@ -252,15 +252,15 @@ export function invert() {
 export function reset() {
   if (!currentViewport) return;
   currentViewport.resetCamera();
-  currentViewport.resetProperties();
+  try { currentViewport.resetProperties(); } catch (e) {}
   currentViewport.render();
 }
 
 // ============================================================
-// Presets — Window/Level
+// Presets — Window/Level for CT (uses HU values via voiRange)
 // ============================================================
 
-// [windowWidth, windowCenter]
+// [windowWidth, windowCenter] in HU
 const PRESETS = {
   bone: [2000, 400],
   softTissue: [400, 40],
@@ -272,10 +272,7 @@ export function applyPreset(name) {
   if (!currentViewport || !PRESETS[name]) return;
   const [ww, wc] = PRESETS[name];
   currentViewport.setProperties({
-    voiRange: {
-      lower: wc - ww / 2,
-      upper: wc + ww / 2,
-    },
+    voiRange: { lower: wc - ww / 2, upper: wc + ww / 2 },
   });
   currentViewport.render();
 }
@@ -286,16 +283,36 @@ export function applyPreset(name) {
 
 export function goToSlice(index) {
   if (!currentViewport) return;
-  currentViewport.setImageIdIndex(index);
+  try {
+    // In a volume viewport, we scroll by setting the image index
+    if (currentViewport.setImageIdIndex) {
+      currentViewport.setImageIdIndex(index);
+    }
+  } catch (e) {
+    console.warn('goToSlice failed:', e.message);
+  }
 }
 
 export function getCurrentSliceIndex() {
   if (!currentViewport) return 0;
-  return currentViewport.getCurrentImageIdIndex();
+  try {
+    return currentViewport.getCurrentImageIdIndex();
+  } catch (e) {
+    return 0;
+  }
+}
+
+export function getNumberOfSlices() {
+  if (!currentViewport) return 0;
+  try {
+    return currentViewport.getNumberOfSlices ? currentViewport.getNumberOfSlices() : currentImageIds.length;
+  } catch (e) {
+    return currentImageIds.length;
+  }
 }
 
 // ============================================================
-// Read viewport state (for overlay display)
+// Overlay readouts
 // ============================================================
 
 export function getWindowLevel() {
@@ -317,8 +334,6 @@ export function getZoom() {
   if (!currentViewport) return null;
   try {
     const camera = currentViewport.getCamera();
-    // Zoom in Cornerstone3D is derived from parallelScale
-    // A larger parallelScale = zoomed out
     return camera.parallelScale ? Math.round((1 / camera.parallelScale) * 100) : null;
   } catch (e) {
     return null;
@@ -331,18 +346,18 @@ export function getZoom() {
 
 export function cleanup() {
   if (renderingEngine) {
-    try {
-      renderingEngine.destroy();
-    } catch (e) {}
+    try { renderingEngine.destroy(); } catch (e) {}
     renderingEngine = null;
   }
-  try {
-    ToolGroupManager.destroyToolGroup(TOOL_GROUP_ID);
-  } catch (e) {}
+  try { ToolGroupManager.destroyToolGroup(TOOL_GROUP_ID); } catch (e) {}
+  if (currentVolumeId) {
+    try { cache.removeVolumeLoadObject(currentVolumeId); } catch (e) {}
+  }
   toolGroup = null;
   currentViewport = null;
   currentElement = null;
   currentImageIds = [];
+  currentVolumeId = null;
 }
 
 // ============================================================
@@ -356,10 +371,7 @@ export async function screenshot(filename) {
 
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
-      if (!blob) {
-        reject(new Error('Failed to create blob'));
-        return;
-      }
+      if (!blob) return reject(new Error('Failed to create blob'));
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -373,19 +385,12 @@ export async function screenshot(filename) {
   });
 }
 
-// ============================================================
-// Resize (call on window resize / fullscreen toggle)
-// ============================================================
-
 export function resize() {
   if (renderingEngine) {
-    try {
-      renderingEngine.resize();
-    } catch (e) {}
+    try { renderingEngine.resize(); } catch (e) {}
   }
 }
 
-// Expose number of imageIds for slider
 export function getImageIdCount() {
   return currentImageIds.length;
 }
