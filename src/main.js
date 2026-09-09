@@ -1,7 +1,10 @@
 // ============================================================
-// DICOM Cloud Viewer — Session 1c
-// Adds: toolbar, presets, measurements, transforms, mobile support
+// DICOM Cloud Viewer — Session 2a
+// Migrated to Cornerstone3D v3 (bundled via Vite)
 // ============================================================
+
+import * as viewer from './viewer.js';
+import dicomParser from 'dicom-parser';
 
 const PASSWORD_KEY = 'dicomViewerAuth';
 const $ = (id) => document.getElementById(id);
@@ -57,7 +60,7 @@ function logout() {
 // ============================================================
 
 function showStudies() {
-  cleanupViewer();
+  viewer.cleanup();
   $('studiesView').classList.remove('hidden');
   $('uploadView').classList.add('hidden');
   $('viewerView').classList.add('hidden');
@@ -65,7 +68,7 @@ function showStudies() {
 }
 
 function showUpload() {
-  cleanupViewer();
+  viewer.cleanup();
   $('studiesView').classList.add('hidden');
   $('uploadView').classList.remove('hidden');
   $('viewerView').classList.add('hidden');
@@ -175,7 +178,7 @@ async function uploadOne(file, idx, total, log) {
   const byteArray = new Uint8Array(arrayBuffer);
   let dataSet;
   try {
-    dataSet = window.dicomParser.parseDicom(byteArray);
+    dataSet = dicomParser.parseDicom(byteArray);
   } catch (err) {
     throw new Error('Not a valid DICOM file');
   }
@@ -208,60 +211,7 @@ async function uploadOne(file, idx, total, log) {
 // Viewer
 // ============================================================
 
-let cornerstoneInited = false;
-let currentImageIds = [];
-let currentElement = null;
 let currentStudyTitle = '';
-
-function initCornerstone() {
-  if (cornerstoneInited) return;
-  const cornerstone = window.cornerstone;
-  const cornerstoneTools = window.cornerstoneTools;
-  const cornerstoneMath = window.cornerstoneMath;
-  const cornerstoneWADOImageLoader = window.cornerstoneWADOImageLoader;
-  const dicomParser = window.dicomParser;
-  const Hammer = window.Hammer;
-
-  if (!cornerstone || !cornerstoneWADOImageLoader) {
-    throw new Error('Cornerstone libraries did not load from CDN');
-  }
-
-  cornerstoneWADOImageLoader.external.cornerstone = cornerstone;
-  cornerstoneWADOImageLoader.external.dicomParser = dicomParser;
-  cornerstoneTools.external.cornerstone = cornerstone;
-  cornerstoneTools.external.cornerstoneMath = cornerstoneMath;
-  cornerstoneTools.external.Hammer = Hammer;
-
-  cornerstoneTools.init({
-    showSVGCursors: true,
-    touchEnabled: true,
-  });
-
-  cornerstoneWADOImageLoader.webWorkerManager.initialize({
-    maxWebWorkers: Math.max(1, (navigator.hardwareConcurrency || 4) - 1),
-    startWebWorkersOnDemand: true,
-    taskConfiguration: { decodeTask: { initializeCodecsOnStartup: false } },
-  });
-
-  cornerstoneInited = true;
-}
-
-function cleanupViewer() {
-  if (!currentElement || !window.cornerstone) return;
-  try {
-    window.cornerstone.disable(currentElement);
-  } catch (e) {}
-  currentElement = null;
-  currentImageIds = [];
-}
-
-// Presets: [windowWidth, windowCenter]
-const PRESETS = {
-  bone: [2000, 400],
-  softTissue: [400, 40],
-  teeth: [3500, 1500],
-  air: [2000, -500],
-};
 
 async function openStudy(studyUID) {
   showViewer();
@@ -270,205 +220,88 @@ async function openStudy(studyUID) {
   $('viewerProgress').textContent = '';
 
   try {
-    initCornerstone();
-    const res = await fetch(`/api/list-instances?studyUID=${encodeURIComponent(studyUID)}`, { headers: authHeaders() });
+    // Initialize Cornerstone (idempotent)
+    $('viewerProgress').textContent = 'Initializing viewer...';
+    await viewer.initViewer();
+
+    // Fetch signed URLs for all instances
+    $('viewerProgress').textContent = 'Fetching instance list...';
+    const res = await fetch(`/api/list-instances?studyUID=${encodeURIComponent(studyUID)}`, {
+      headers: authHeaders(),
+    });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const { instances, description } = await res.json();
+
     if (!instances || instances.length === 0) {
       $('viewerTitle').textContent = 'No images found in this study';
+      $('viewerProgress').textContent = '';
       return;
     }
 
     currentStudyTitle = description || studyUID;
     $('viewerTitle').textContent = currentStudyTitle;
     $('viewerInfo').textContent = `Slice 1 of ${instances.length}`;
-
-    currentImageIds = instances.map((inst) => `wadouri:${inst.url}`);
-    const cornerstone = window.cornerstone;
-    const cornerstoneTools = window.cornerstoneTools;
-    const element = $('dicomViewport');
-    currentElement = element;
-
-    cornerstone.enable(element);
-
     $('viewerProgress').textContent = 'Loading first slice...';
-    const firstImage = await cornerstone.loadAndCacheImage(currentImageIds[0]);
-    cornerstone.displayImage(element, firstImage);
+
+    const element = $('dicomViewport');
+
+    // Load study — first slice renders, rest prefetch in background
+    await viewer.loadStudy(
+      element,
+      instances,
+      // onProgress
+      (loaded, total) => {
+        if (loaded < total) {
+          $('viewerProgress').textContent = `Prefetched ${loaded} / ${total} slices`;
+        } else {
+          $('viewerProgress').textContent = 'All slices cached';
+          setTimeout(() => ($('viewerProgress').textContent = ''), 2000);
+        }
+      },
+      // onSliceChange
+      (idx) => {
+        $('viewerInfo').textContent = `Slice ${idx + 1} of ${instances.length}`;
+        $('sliceSlider').value = idx;
+        $('sliceValue').textContent = `${idx + 1} / ${instances.length}`;
+      },
+      // onRender (updates W/L and zoom overlays)
+      () => {
+        const wl = viewer.getWindowLevel();
+        if (wl) $('overlayWL').textContent = `W: ${wl.windowWidth}  L: ${wl.windowCenter}`;
+        const zoom = viewer.getZoom();
+        if (zoom != null) $('overlayZoom').textContent = `Zoom: ${zoom}%`;
+      }
+    );
+
     $('viewerProgress').textContent = '';
-
-    // Set up stack for scrolling
-    const stack = { currentImageIdIndex: 0, imageIds: currentImageIds };
-    cornerstoneTools.clearToolState(element, 'stack');
-    cornerstoneTools.addStackStateManager(element, ['stack']);
-    cornerstoneTools.addToolState(element, 'stack', stack);
-
-    // Register all tools
-    const tools = [
-      { tool: cornerstoneTools.WwwcTool, name: 'Wwwc' },
-      { tool: cornerstoneTools.PanTool, name: 'Pan' },
-      { tool: cornerstoneTools.ZoomTool, name: 'Zoom' },
-      { tool: cornerstoneTools.StackScrollTool, name: 'StackScroll' },
-      { tool: cornerstoneTools.StackScrollMouseWheelTool, name: 'StackScrollMouseWheel' },
-      { tool: cornerstoneTools.LengthTool, name: 'Length' },
-      { tool: cornerstoneTools.AngleTool, name: 'Angle' },
-    ];
-    tools.forEach((t) => cornerstoneTools.addTool(t.tool));
-
-    // Mouse wheel always scrolls slices regardless of active tool
-    cornerstoneTools.setToolActive('StackScrollMouseWheel', {});
-
-    // Default active tool: Window/Level
-    setActiveTool('Wwwc');
 
     // Set up slice slider
     const slider = $('sliceSlider');
     slider.max = instances.length - 1;
     slider.value = 0;
     $('sliceValue').textContent = `1 / ${instances.length}`;
-
     slider.addEventListener('input', () => {
-      const idx = parseInt(slider.value, 10);
-      cornerstoneTools.scrollToIndex(element, idx);
-    });
-
-    // Update UI on slice change (from any source: wheel, drag, slider)
-    element.addEventListener('cornerstonenewimage', (e) => {
-      const idx = currentImageIds.indexOf(e.detail.image.imageId);
-      if (idx >= 0) {
-        $('viewerInfo').textContent = `Slice ${idx + 1} of ${currentImageIds.length}`;
-        slider.value = idx;
-        $('sliceValue').textContent = `${idx + 1} / ${currentImageIds.length}`;
-      }
-    });
-
-    // Update overlays on image render (W/L values, zoom)
-    element.addEventListener('cornerstoneimagerendered', () => {
-      try {
-        const viewport = cornerstone.getViewport(element);
-        if (viewport && viewport.voi) {
-          const ww = Math.round(viewport.voi.windowWidth);
-          const wc = Math.round(viewport.voi.windowCenter);
-          $('overlayWL').textContent = `W: ${ww}  L: ${wc}`;
-        }
-        if (viewport && viewport.scale) {
-          $('overlayZoom').textContent = `Zoom: ${Math.round(viewport.scale * 100)}%`;
-        }
-      } catch (e) {}
-    });
-
-    // Prefetch a bunch of slices in background so scrolling feels smooth
-    currentImageIds.slice(1, 50).forEach((id) => {
-      cornerstone.loadAndCacheImage(id).catch(() => {});
+      viewer.goToSlice(parseInt(slider.value, 10));
     });
   } catch (err) {
     $('viewerTitle').textContent = 'Failed to load: ' + err.message;
+    $('viewerProgress').textContent = '';
     console.error('openStudy error:', err);
   }
 }
 
 // ============================================================
-// Toolbar: active-tool switching
+// Toolbar actions
 // ============================================================
 
-// Tools that use mouse-button + touch drag
-const DRAG_TOOLS = ['Wwwc', 'Pan', 'Zoom', 'StackScroll', 'Length', 'Angle'];
-
-function setActiveTool(toolName) {
-  if (!window.cornerstoneTools) return;
-  const cornerstoneTools = window.cornerstoneTools;
-
-  // Deactivate all drag tools first
-  DRAG_TOOLS.forEach((name) => {
-    try {
-      cornerstoneTools.setToolPassive(name);
-    } catch (e) {}
-  });
-
-  // Activate the selected tool for mouse button 1 + touch
-  try {
-    cornerstoneTools.setToolActive(toolName, {
-      mouseButtonMask: 1,
-      isTouchActive: true,
-    });
-  } catch (e) {
-    console.error('setToolActive failed for', toolName, e);
-  }
-
-  // Middle-drag always pans, right-drag always zooms (on top of the primary tool)
-  try {
-    cornerstoneTools.setToolActive('Pan', { mouseButtonMask: 4 });
-    cornerstoneTools.setToolActive('Zoom', { mouseButtonMask: 2 });
-  } catch (e) {}
-
-  // Update button UI
-  $$('.tool-btn[data-tool]').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.tool === toolName);
-  });
-}
-
-// ============================================================
-// Toolbar: transform actions
-// ============================================================
-
-function rotateViewport() {
-  if (!currentElement) return;
-  const cornerstone = window.cornerstone;
-  const viewport = cornerstone.getViewport(currentElement);
-  viewport.rotation = (viewport.rotation + 90) % 360;
-  cornerstone.setViewport(currentElement, viewport);
-}
-
-function flipHorizontal() {
-  if (!currentElement) return;
-  const cornerstone = window.cornerstone;
-  const viewport = cornerstone.getViewport(currentElement);
-  viewport.hflip = !viewport.hflip;
-  cornerstone.setViewport(currentElement, viewport);
-}
-
-function flipVertical() {
-  if (!currentElement) return;
-  const cornerstone = window.cornerstone;
-  const viewport = cornerstone.getViewport(currentElement);
-  viewport.vflip = !viewport.vflip;
-  cornerstone.setViewport(currentElement, viewport);
-}
-
-function invertColors() {
-  if (!currentElement) return;
-  const cornerstone = window.cornerstone;
-  const viewport = cornerstone.getViewport(currentElement);
-  viewport.invert = !viewport.invert;
-  cornerstone.setViewport(currentElement, viewport);
-}
-
-function resetView() {
-  if (!currentElement) return;
-  const cornerstone = window.cornerstone;
-  cornerstone.reset(currentElement);
-}
-
-function applyPreset(name) {
-  if (!currentElement || !PRESETS[name]) return;
-  const cornerstone = window.cornerstone;
-  const [ww, wc] = PRESETS[name];
-  const viewport = cornerstone.getViewport(currentElement);
-  viewport.voi.windowWidth = ww;
-  viewport.voi.windowCenter = wc;
-  cornerstone.setViewport(currentElement, viewport);
-}
-
-// Fullscreen with iOS fallback
 async function toggleFullscreen() {
   const container = $('viewportContainer');
   if (!container) return;
 
-  // Check if we're in real fullscreen or pseudo-fullscreen
   const isRealFullscreen = document.fullscreenElement || document.webkitFullscreenElement;
   const isPseudoFullscreen = container.classList.contains('pseudo-fullscreen');
 
   if (isRealFullscreen || isPseudoFullscreen) {
-    // Exit
     if (document.fullscreenElement && document.exitFullscreen) {
       await document.exitFullscreen();
     } else if (document.webkitFullscreenElement && document.webkitExitFullscreen) {
@@ -476,63 +309,28 @@ async function toggleFullscreen() {
     }
     container.classList.remove('pseudo-fullscreen');
   } else {
-    // Enter — try real fullscreen first
     try {
       if (container.requestFullscreen) {
         await container.requestFullscreen();
       } else if (container.webkitRequestFullscreen) {
         container.webkitRequestFullscreen();
       } else {
-        // iOS Safari fallback — use CSS pseudo-fullscreen
         container.classList.add('pseudo-fullscreen');
       }
     } catch (err) {
-      // If real fullscreen fails, fall back to pseudo
       container.classList.add('pseudo-fullscreen');
     }
   }
 
-  // Give the browser a moment, then trigger a resize so canvas fits
-  setTimeout(() => {
-    if (currentElement && window.cornerstone) {
-      try {
-        window.cornerstone.resize(currentElement);
-      } catch (e) {}
-    }
-  }, 250);
+  setTimeout(() => viewer.resize(), 250);
 }
 
 async function takeScreenshot() {
-  if (!currentElement) return;
-  const cornerstone = window.cornerstone;
-
-  // Get the canvas that Cornerstone rendered to
-  const canvas = currentElement.querySelector('canvas');
-  if (!canvas) {
-    alert('Could not find canvas to capture');
-    return;
-  }
-
   try {
-    // Convert canvas to blob and trigger download
-    canvas.toBlob((blob) => {
-      if (!blob) {
-        alert('Failed to create screenshot');
-        return;
-      }
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const safeTitle = currentStudyTitle.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 40);
-      a.href = url;
-      a.download = `${safeTitle}_${timestamp}.png`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }, 'image/png');
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const safeTitle = currentStudyTitle.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 40) || 'study';
+    await viewer.screenshot(`${safeTitle}_${timestamp}.png`);
   } catch (err) {
-    console.error('Screenshot error:', err);
     alert('Screenshot failed: ' + err.message);
   }
 }
@@ -550,22 +348,24 @@ $('navStudies').addEventListener('click', showStudies);
 $('navUpload').addEventListener('click', showUpload);
 $('folderMode').addEventListener('change', toggleFolderMode);
 $('uploadBtn').addEventListener('click', startUpload);
-$('dicomViewport').addEventListener('contextmenu', (e) => e.preventDefault());
 
-// Tool buttons
+// Tool buttons (select active tool)
 $$('.tool-btn[data-tool]').forEach((btn) => {
-  btn.addEventListener('click', () => setActiveTool(btn.dataset.tool));
+  btn.addEventListener('click', () => {
+    viewer.setActiveTool(btn.dataset.tool);
+    $$('.tool-btn[data-tool]').forEach((b) => b.classList.toggle('active', b === btn));
+  });
 });
 
 // Action buttons
 $$('.tool-btn[data-action]').forEach((btn) => {
   btn.addEventListener('click', () => {
     const action = btn.dataset.action;
-    if (action === 'rotate') rotateViewport();
-    else if (action === 'flipH') flipHorizontal();
-    else if (action === 'flipV') flipVertical();
-    else if (action === 'invert') invertColors();
-    else if (action === 'reset') resetView();
+    if (action === 'rotate') viewer.rotateViewport();
+    else if (action === 'flipH') viewer.flipH();
+    else if (action === 'flipV') viewer.flipV();
+    else if (action === 'invert') viewer.invert();
+    else if (action === 'reset') viewer.reset();
     else if (action === 'fullscreen') toggleFullscreen();
     else if (action === 'screenshot') takeScreenshot();
   });
@@ -573,17 +373,11 @@ $$('.tool-btn[data-action]').forEach((btn) => {
 
 // Preset buttons
 $$('.preset-btn').forEach((btn) => {
-  btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
+  btn.addEventListener('click', () => viewer.applyPreset(btn.dataset.preset));
 });
 
-// Handle window resize (e.g. rotate device, fullscreen toggle)
-window.addEventListener('resize', () => {
-  if (currentElement && window.cornerstone) {
-    try {
-      window.cornerstone.resize(currentElement);
-    } catch (e) {}
-  }
-});
+// Resize handler
+window.addEventListener('resize', () => viewer.resize());
 
 // Auto-enter if session valid
 if (sessionStorage.getItem(PASSWORD_KEY)) {
