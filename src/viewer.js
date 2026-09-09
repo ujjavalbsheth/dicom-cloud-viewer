@@ -1,7 +1,7 @@
 // ============================================================
-// Cornerstone3D v3 — Dual-mode Viewer
-// Mobile → STACK viewport (fast, works on WebGL-limited devices)
-// Desktop → ORTHOGRAPHIC volume viewport (needed for MPR in Session 2c)
+// Cornerstone3D v3 — MPR Viewer (Session 2c)
+// Desktop: 3 volume viewports (Axial + Sagittal + Coronal) with crosshairs
+// Mobile:  single stack viewport (as Session 2b)
 // ============================================================
 
 import {
@@ -23,6 +23,7 @@ import {
   WindowLevelTool,
   LengthTool,
   AngleTool,
+  CrosshairsTool,
   Enums as ToolEnums,
 } from '@cornerstonejs/tools';
 import * as cornerstoneDICOMImageLoader from '@cornerstonejs/dicom-image-loader';
@@ -31,8 +32,13 @@ const { ViewportType, OrientationAxis } = Enums;
 const { MouseBindings } = ToolEnums;
 
 const RENDERING_ENGINE_ID = 'dicomRenderingEngine';
-const TOOL_GROUP_ID = 'DUAL_TOOL_GROUP';
-const VIEWPORT_ID = 'CT_MAIN';
+const TOOL_GROUP_ID = 'MPR_TOOL_GROUP';
+const VIEWPORT_IDS = {
+  AXIAL: 'CT_AXIAL',
+  SAGITTAL: 'CT_SAGITTAL',
+  CORONAL: 'CT_CORONAL',
+};
+const STACK_VIEWPORT_ID = 'CT_STACK';
 const VOLUME_ID_PREFIX = 'cornerstoneStreamingImageVolume:';
 
 let initialized = false;
@@ -40,20 +46,18 @@ let renderingEngine = null;
 let toolGroup = null;
 let currentVolumeId = null;
 let currentImageIds = [];
-let currentViewport = null;
-let currentElement = null;
-let currentMode = null; // 'stack' or 'volume'
+let currentMode = null; // 'stack' | 'mpr'
+let currentViewports = {}; // { AXIAL: viewport, SAGITTAL: viewport, CORONAL: viewport } OR { STACK: viewport }
+let activeViewportId = null; // The viewport whose actions/presets currently apply
 
 // ============================================================
 // Mobile detection
 // ============================================================
 
 export function isMobileDevice() {
-  // Multi-signal detection: touch + coarse pointer + narrow screen
   const hasTouch = navigator.maxTouchPoints > 0 || 'ontouchstart' in window;
   const coarsePointer = window.matchMedia('(pointer: coarse)').matches;
   const narrowScreen = window.innerWidth < 1024;
-  // Consider mobile if it has touch AND (coarse pointer OR narrow screen)
   return hasTouch && (coarsePointer || narrowScreen);
 }
 
@@ -62,7 +66,7 @@ export function getViewerMode() {
 }
 
 // ============================================================
-// Initialization (call once)
+// Initialization
 // ============================================================
 
 export async function initViewer() {
@@ -81,25 +85,31 @@ export async function initViewer() {
   addTool(StackScrollTool);
   addTool(LengthTool);
   addTool(AngleTool);
+  addTool(CrosshairsTool);
 
   initialized = true;
 }
 
 // ============================================================
-// Load study — picks stack or volume based on device
+// Load study — picks stack (mobile) or MPR (desktop)
 // ============================================================
 
-export async function loadStudy(element, instances, onProgress, onSliceChange, onRender) {
+/**
+ * @param {Object} elements - Either {stack: HTMLElement} OR {axial, sagittal, coronal: HTMLElement}
+ * @param {Array<{url}>} instances
+ * @param {function} onProgress
+ * @param {function} onSliceChange
+ * @param {function} onRender
+ */
+export async function loadStudy(elements, instances, onProgress, onSliceChange, onRender) {
   if (!initialized) throw new Error('Call initViewer() first');
 
   cleanup();
-  currentElement = element;
   currentImageIds = instances.map((inst) => `wadouri:${inst.url}`);
-  currentMode = isMobileDevice() ? 'stack' : 'volume';
+  currentMode = isMobileDevice() ? 'stack' : 'mpr';
 
   renderingEngine = new RenderingEngine(RENDERING_ENGINE_ID);
 
-  // Create tool group (destroy old if exists)
   try { ToolGroupManager.destroyToolGroup(TOOL_GROUP_ID); } catch (e) {}
   toolGroup = ToolGroupManager.createToolGroup(TOOL_GROUP_ID);
   toolGroup.addTool(WindowLevelTool.toolName);
@@ -110,53 +120,56 @@ export async function loadStudy(element, instances, onProgress, onSliceChange, o
   toolGroup.addTool(AngleTool.toolName);
 
   if (currentMode === 'stack') {
-    await loadAsStack(element, onProgress, onSliceChange, onRender);
+    if (!elements.stack) throw new Error('Stack mode requires elements.stack');
+    await loadAsStack(elements.stack, onProgress, onSliceChange, onRender);
   } else {
-    await loadAsVolume(element, onProgress, onSliceChange, onRender);
+    if (!elements.axial || !elements.sagittal || !elements.coronal) {
+      throw new Error('MPR mode requires elements.axial, .sagittal, .coronal');
+    }
+    toolGroup.addTool(CrosshairsTool.toolName);
+    await loadAsMPR(elements, onProgress, onSliceChange, onRender);
   }
 
-  return { viewport: currentViewport, imageIds: currentImageIds, mode: currentMode };
+  return { mode: currentMode, imageIds: currentImageIds };
 }
 
 // ============================================================
-// Stack loading (mobile path)
+// Stack loading (mobile)
 // ============================================================
 
 async function loadAsStack(element, onProgress, onSliceChange, onRender) {
   const viewportInput = {
-    viewportId: VIEWPORT_ID,
+    viewportId: STACK_VIEWPORT_ID,
     type: ViewportType.STACK,
     element,
     defaultOptions: { background: [0, 0, 0] },
   };
-
   renderingEngine.enableElement(viewportInput);
-  currentViewport = renderingEngine.getViewport(VIEWPORT_ID);
+  const viewport = renderingEngine.getViewport(STACK_VIEWPORT_ID);
+  currentViewports = { STACK: viewport };
+  activeViewportId = STACK_VIEWPORT_ID;
 
-  toolGroup.addViewport(VIEWPORT_ID, RENDERING_ENGINE_ID);
+  toolGroup.addViewport(STACK_VIEWPORT_ID, RENDERING_ENGINE_ID);
   configureToolBindings();
 
-  // Load first slice
-  await currentViewport.setStack(currentImageIds, 0);
-  currentViewport.render();
+  await viewport.setStack(currentImageIds, 0);
+  viewport.render();
 
-  // Slice change event (STACK uses STACK_NEW_IMAGE)
   element.addEventListener(Enums.Events.STACK_NEW_IMAGE, () => {
     if (onSliceChange) {
       try {
-        const idx = currentViewport.getCurrentImageIdIndex();
-        onSliceChange(idx);
+        const idx = viewport.getCurrentImageIdIndex();
+        onSliceChange({ viewportId: STACK_VIEWPORT_ID, index: idx });
       } catch (e) {}
     }
   });
 
   if (onRender) {
     element.addEventListener(Enums.Events.IMAGE_RENDERED, () => {
-      try { onRender(currentViewport); } catch (e) {}
+      try { onRender(viewport); } catch (e) {}
     });
   }
 
-  // Background prefetch
   prefetchStackSlices(currentImageIds, onProgress);
 }
 
@@ -164,58 +177,88 @@ async function prefetchStackSlices(imageIds, onProgress) {
   const total = imageIds.length;
   let loaded = 1;
   if (onProgress) onProgress(loaded, total);
-  const CONCURRENCY = 4; // lower on mobile
   let cursor = 1;
-
   async function worker() {
     while (cursor < total) {
       const i = cursor++;
-      try {
-        await imageLoader.loadAndCacheImage(imageIds[i]);
-      } catch (e) {}
+      try { await imageLoader.loadAndCacheImage(imageIds[i]); } catch (e) {}
       loaded++;
       if (onProgress && loaded % 10 === 0) onProgress(loaded, total);
     }
   }
-  await Promise.all(Array(CONCURRENCY).fill(0).map(worker));
+  await Promise.all(Array(4).fill(0).map(worker));
   if (onProgress) onProgress(total, total);
 }
 
 // ============================================================
-// Volume loading (desktop path)
+// MPR loading (desktop) — 3 orthogonal volume viewports
 // ============================================================
 
-async function loadAsVolume(element, onProgress, onSliceChange, onRender) {
+async function loadAsMPR(elements, onProgress, onSliceChange, onRender) {
   currentVolumeId = VOLUME_ID_PREFIX + 'STUDY_' + Date.now();
 
-  const viewportInput = {
-    viewportId: VIEWPORT_ID,
-    type: ViewportType.ORTHOGRAPHIC,
-    element,
-    defaultOptions: {
-      orientation: OrientationAxis.AXIAL,
-      background: [0, 0, 0],
+  const viewportInputs = [
+    {
+      viewportId: VIEWPORT_IDS.AXIAL,
+      type: ViewportType.ORTHOGRAPHIC,
+      element: elements.axial,
+      defaultOptions: { orientation: OrientationAxis.AXIAL, background: [0, 0, 0] },
     },
-  };
+    {
+      viewportId: VIEWPORT_IDS.SAGITTAL,
+      type: ViewportType.ORTHOGRAPHIC,
+      element: elements.sagittal,
+      defaultOptions: { orientation: OrientationAxis.SAGITTAL, background: [0, 0, 0] },
+    },
+    {
+      viewportId: VIEWPORT_IDS.CORONAL,
+      type: ViewportType.ORTHOGRAPHIC,
+      element: elements.coronal,
+      defaultOptions: { orientation: OrientationAxis.CORONAL, background: [0, 0, 0] },
+    },
+  ];
 
-  renderingEngine.enableElement(viewportInput);
-  currentViewport = renderingEngine.getViewport(VIEWPORT_ID);
-  toolGroup.addViewport(VIEWPORT_ID, RENDERING_ENGINE_ID);
+  renderingEngine.setViewports(viewportInputs);
+
+  currentViewports = {
+    AXIAL: renderingEngine.getViewport(VIEWPORT_IDS.AXIAL),
+    SAGITTAL: renderingEngine.getViewport(VIEWPORT_IDS.SAGITTAL),
+    CORONAL: renderingEngine.getViewport(VIEWPORT_IDS.CORONAL),
+  };
+  activeViewportId = VIEWPORT_IDS.AXIAL; // Default active
+
+  // Add all three viewports to the same tool group
+  toolGroup.addViewport(VIEWPORT_IDS.AXIAL, RENDERING_ENGINE_ID);
+  toolGroup.addViewport(VIEWPORT_IDS.SAGITTAL, RENDERING_ENGINE_ID);
+  toolGroup.addViewport(VIEWPORT_IDS.CORONAL, RENDERING_ENGINE_ID);
   configureToolBindings();
 
+  // Create volume
   const volume = await volumeLoader.createAndCacheVolume(currentVolumeId, {
     imageIds: currentImageIds,
   });
 
+  // Progress: count image loads (fires once per slice as it enters the volume)
   if (onProgress) {
     onProgress(0, currentImageIds.length);
     let loaded = 0;
-    element.addEventListener(Enums.Events.IMAGE_LOADED, () => {
-      loaded++;
-      if (loaded <= currentImageIds.length) {
-        onProgress(loaded, currentImageIds.length);
-      }
+    // Listen on the rendering engine's events (image loaded is a global event on cache)
+    Object.values(currentViewports).forEach((vp) => {
+      vp.element.addEventListener(Enums.Events.IMAGE_LOADED, () => {
+        loaded++;
+        if (loaded <= currentImageIds.length && loaded % 10 === 0) {
+          onProgress(loaded, currentImageIds.length);
+        }
+      });
     });
+    // Also listen for the final ready state
+    const check = setInterval(() => {
+      if (loaded >= currentImageIds.length) {
+        onProgress(currentImageIds.length, currentImageIds.length);
+        clearInterval(check);
+      }
+    }, 1000);
+    setTimeout(() => clearInterval(check), 120000);
   }
 
   volume.load();
@@ -223,30 +266,42 @@ async function loadAsVolume(element, onProgress, onSliceChange, onRender) {
   await setVolumesForViewports(
     renderingEngine,
     [{ volumeId: currentVolumeId }],
-    [VIEWPORT_ID]
+    [VIEWPORT_IDS.AXIAL, VIEWPORT_IDS.SAGITTAL, VIEWPORT_IDS.CORONAL]
   );
 
-  currentViewport.render();
+  // Render all
+  renderingEngine.renderViewports([
+    VIEWPORT_IDS.AXIAL,
+    VIEWPORT_IDS.SAGITTAL,
+    VIEWPORT_IDS.CORONAL,
+  ]);
 
-  // Volume viewports use CAMERA_MODIFIED for slice changes
-  element.addEventListener(Enums.Events.CAMERA_MODIFIED, () => {
-    if (onSliceChange) {
-      try {
-        const idx = currentViewport.getCurrentImageIdIndex();
-        if (idx != null) onSliceChange(idx);
-      } catch (e) {}
-    }
-  });
-
-  if (onRender) {
-    element.addEventListener(Enums.Events.IMAGE_RENDERED, () => {
-      try { onRender(currentViewport); } catch (e) {}
+  // Slice-change event (each viewport reports its own current slice)
+  Object.entries(currentViewports).forEach(([label, vp]) => {
+    vp.element.addEventListener(Enums.Events.CAMERA_MODIFIED, () => {
+      if (onSliceChange) {
+        try {
+          const idx = vp.getCurrentImageIdIndex();
+          onSliceChange({ viewportId: vp.id, orientation: label, index: idx });
+        } catch (e) {}
+      }
     });
-  }
+
+    if (onRender) {
+      vp.element.addEventListener(Enums.Events.IMAGE_RENDERED, () => {
+        try { onRender(vp); } catch (e) {}
+      });
+    }
+
+    // Click on a viewport to make it "active" (its state feeds the overlays)
+    vp.element.addEventListener('click', () => {
+      activeViewportId = vp.id;
+    });
+  });
 }
 
 // ============================================================
-// Shared: tool binding config
+// Tool bindings
 // ============================================================
 
 function configureToolBindings() {
@@ -265,65 +320,85 @@ function configureToolBindings() {
 }
 
 // ============================================================
-// Tool switching (shared between modes)
+// Tool switching
 // ============================================================
 
-const DRAG_TOOLS = ['WindowLevel', 'Pan', 'Zoom', 'StackScroll', 'Length', 'Angle'];
+const DRAG_TOOLS = ['WindowLevel', 'Pan', 'Zoom', 'StackScroll', 'Length', 'Angle', 'Crosshairs'];
 
 export function setActiveTool(toolName) {
   if (!toolGroup) return;
+
+  // If someone tries to activate Crosshairs but we're in stack mode, warn and skip
+  if (toolName === 'Crosshairs' && currentMode !== 'mpr') {
+    console.warn('Crosshairs tool only available in MPR mode');
+    return;
+  }
+
   DRAG_TOOLS.forEach((name) => {
     try { toolGroup.setToolPassive(name); } catch (e) {}
   });
+
   toolGroup.setToolActive(toolName, {
     bindings: [{ mouseButton: MouseBindings.Primary }],
   });
+
   configureToolBindings();
 }
 
 // ============================================================
-// Transform actions
+// Transform actions — operate on active viewport
 // ============================================================
 
+function getActiveViewport() {
+  if (!renderingEngine || !activeViewportId) return null;
+  try { return renderingEngine.getViewport(activeViewportId); } catch (e) { return null; }
+}
+
 export function rotateViewport() {
-  if (!currentViewport) return;
+  const vp = getActiveViewport();
+  if (!vp) return;
   try {
-    const rotation = ((currentViewport.getRotation ? currentViewport.getRotation() : 0) + 90) % 360;
-    currentViewport.setViewPresentation({ rotation });
-    currentViewport.render();
+    const rotation = ((vp.getRotation ? vp.getRotation() : 0) + 90) % 360;
+    vp.setViewPresentation({ rotation });
+    vp.render();
   } catch (e) {}
 }
 
 export function flipH() {
-  if (!currentViewport) return;
-  const camera = currentViewport.getCamera();
-  currentViewport.setCamera({ ...camera, flipHorizontal: !camera.flipHorizontal });
-  currentViewport.render();
+  const vp = getActiveViewport();
+  if (!vp) return;
+  const camera = vp.getCamera();
+  vp.setCamera({ ...camera, flipHorizontal: !camera.flipHorizontal });
+  vp.render();
 }
 
 export function flipV() {
-  if (!currentViewport) return;
-  const camera = currentViewport.getCamera();
-  currentViewport.setCamera({ ...camera, flipVertical: !camera.flipVertical });
-  currentViewport.render();
+  const vp = getActiveViewport();
+  if (!vp) return;
+  const camera = vp.getCamera();
+  vp.setCamera({ ...camera, flipVertical: !camera.flipVertical });
+  vp.render();
 }
 
 export function invert() {
-  if (!currentViewport) return;
-  const properties = currentViewport.getProperties();
-  currentViewport.setProperties({ invert: !properties.invert });
-  currentViewport.render();
+  // Invert applies to all viewports (all render the same volume)
+  Object.values(currentViewports).forEach((vp) => {
+    const properties = vp.getProperties();
+    vp.setProperties({ invert: !properties.invert });
+    vp.render();
+  });
 }
 
 export function reset() {
-  if (!currentViewport) return;
-  currentViewport.resetCamera();
-  try { currentViewport.resetProperties(); } catch (e) {}
-  currentViewport.render();
+  Object.values(currentViewports).forEach((vp) => {
+    vp.resetCamera();
+    try { vp.resetProperties(); } catch (e) {}
+    vp.render();
+  });
 }
 
 // ============================================================
-// Presets
+// Presets — applied to all viewports
 // ============================================================
 
 const PRESETS = {
@@ -334,63 +409,59 @@ const PRESETS = {
 };
 
 export function applyPreset(name) {
-  if (!currentViewport || !PRESETS[name]) return;
+  if (!PRESETS[name]) return;
   const [ww, wc] = PRESETS[name];
-  currentViewport.setProperties({
-    voiRange: { lower: wc - ww / 2, upper: wc + ww / 2 },
+  Object.values(currentViewports).forEach((vp) => {
+    vp.setProperties({
+      voiRange: { lower: wc - ww / 2, upper: wc + ww / 2 },
+    });
+    vp.render();
   });
-  currentViewport.render();
 }
 
 // ============================================================
-// Slice control
+// Slice control — for stack mode only (MPR uses crosshair/scroll per viewport)
 // ============================================================
 
 export function goToSlice(index) {
-  if (!currentViewport) return;
+  const vp = getActiveViewport();
+  if (!vp) return;
   try {
-    if (currentViewport.setImageIdIndex) {
-      currentViewport.setImageIdIndex(index);
-    }
+    if (vp.setImageIdIndex) vp.setImageIdIndex(index);
   } catch (e) {}
 }
 
 export function getCurrentSliceIndex() {
-  if (!currentViewport) return 0;
-  try {
-    return currentViewport.getCurrentImageIdIndex();
-  } catch (e) {
-    return 0;
-  }
+  const vp = getActiveViewport();
+  if (!vp) return 0;
+  try { return vp.getCurrentImageIdIndex(); } catch (e) { return 0; }
 }
 
 // ============================================================
-// Overlay readouts
+// Overlay readouts (from active viewport)
 // ============================================================
 
 export function getWindowLevel() {
-  if (!currentViewport) return null;
+  const vp = getActiveViewport();
+  if (!vp) return null;
   try {
-    const properties = currentViewport.getProperties();
+    const properties = vp.getProperties();
     if (!properties || !properties.voiRange) return null;
     const { lower, upper } = properties.voiRange;
     return {
       windowWidth: Math.round(upper - lower),
       windowCenter: Math.round((upper + lower) / 2),
     };
-  } catch (e) {
-    return null;
-  }
+  } catch (e) { return null; }
 }
 
 export function getZoom() {
-  if (!currentViewport) return null;
+  const vp = getActiveViewport();
+  if (!vp) return null;
   try {
-    const camera = currentViewport.getCamera();
+    const camera = vp.getCamera();
     return camera.parallelScale ? Math.round((1 / camera.parallelScale) * 100) : null;
-  } catch (e) {
-    return null;
-  }
+  } catch (e) { return null; }
 }
 
 // ============================================================
@@ -407,20 +478,21 @@ export function cleanup() {
     try { cache.removeVolumeLoadObject(currentVolumeId); } catch (e) {}
   }
   toolGroup = null;
-  currentViewport = null;
-  currentElement = null;
+  currentViewports = {};
+  activeViewportId = null;
   currentImageIds = [];
   currentVolumeId = null;
   currentMode = null;
 }
 
 // ============================================================
-// Screenshot
+// Screenshot — from the active viewport
 // ============================================================
 
 export async function screenshot(filename) {
-  if (!currentElement) return;
-  const canvas = currentElement.querySelector('canvas');
+  const vp = getActiveViewport();
+  if (!vp) return;
+  const canvas = vp.element.querySelector('canvas');
   if (!canvas) throw new Error('No canvas found');
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
@@ -444,6 +516,4 @@ export function resize() {
   }
 }
 
-export function getImageIdCount() {
-  return currentImageIds.length;
-}
+export function getImageIdCount() { return currentImageIds.length; }
