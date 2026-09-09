@@ -1,6 +1,6 @@
 // ============================================================
-// DICOM Cloud Viewer — Session 2b Mobile Fix
-// Dual mode: stack on mobile, volume on desktop
+// DICOM Cloud Viewer — Session 2c (MPR)
+// Desktop: 3 viewports + crosshairs. Mobile: single stack.
 // ============================================================
 
 import * as viewer from './viewer.js';
@@ -15,7 +15,7 @@ function authHeaders() {
 }
 
 // ============================================================
-// Auth
+// Auth (unchanged)
 // ============================================================
 
 async function checkPassword() {
@@ -45,6 +45,7 @@ async function checkPassword() {
 function enterApp() {
   $('gate').classList.add('hidden');
   $('main').classList.remove('hidden');
+  applyModeUI();
   showStudies();
 }
 
@@ -53,6 +54,28 @@ function logout() {
   $('main').classList.add('hidden');
   $('gate').classList.remove('hidden');
   $('passwordInput').value = '';
+}
+
+// ============================================================
+// Show MPR grid or stack container based on device
+// ============================================================
+
+function applyModeUI() {
+  const isMobile = viewer.isMobileDevice();
+  if (isMobile) {
+    $('mprGrid').classList.add('hidden');
+    $('stackContainer').classList.remove('hidden');
+    $('mobileHint').classList.remove('hidden');
+    // Hide crosshairs button on mobile (doesn't apply)
+    document.querySelectorAll('.desktop-only').forEach((el) => el.classList.add('hidden'));
+    document.querySelectorAll('.mobile-only').forEach((el) => el.classList.remove('hidden'));
+  } else {
+    $('mprGrid').classList.remove('hidden');
+    $('stackContainer').classList.add('hidden');
+    $('mobileHint').classList.add('hidden');
+    document.querySelectorAll('.desktop-only').forEach((el) => el.classList.remove('hidden'));
+    document.querySelectorAll('.mobile-only').forEach((el) => el.classList.add('hidden'));
+  }
 }
 
 // ============================================================
@@ -125,7 +148,7 @@ function formatSize(bytes) {
 }
 
 // ============================================================
-// Upload
+// Upload (unchanged)
 // ============================================================
 
 function toggleFolderMode() {
@@ -146,10 +169,7 @@ async function startUpload() {
   const status = $('uploadStatus');
   status.classList.remove('hidden');
   const logLines = [];
-  const log = (msg) => {
-    logLines.unshift(msg);
-    status.textContent = logLines.slice(0, 200).join('\n');
-  };
+  const log = (msg) => { logLines.unshift(msg); status.textContent = logLines.slice(0, 200).join('\n'); };
   log(`Starting upload of ${files.length} files...`);
   btn.disabled = true;
   let success = 0, failed = 0;
@@ -158,18 +178,12 @@ async function startUpload() {
     while (cursor < files.length) {
       const i = cursor++;
       const file = files[i];
-      try {
-        await uploadOne(file, i + 1, files.length, log);
-        success++;
-      } catch (err) {
-        failed++;
-        log(`[${i + 1}/${files.length}] ${file.name} — FAILED: ${err.message}`);
-      }
+      try { await uploadOne(file, i + 1, files.length, log); success++; }
+      catch (err) { failed++; log(`[${i + 1}/${files.length}] ${file.name} — FAILED: ${err.message}`); }
     }
   }
   await Promise.all(Array(4).fill(0).map(worker));
-  log('');
-  log(`Done. ${success} succeeded, ${failed} failed.`);
+  log(''); log(`Done. ${success} succeeded, ${failed} failed.`);
   btn.disabled = false;
 }
 
@@ -177,11 +191,8 @@ async function uploadOne(file, idx, total, log) {
   const arrayBuffer = await file.arrayBuffer();
   const byteArray = new Uint8Array(arrayBuffer);
   let dataSet;
-  try {
-    dataSet = dicomParser.parseDicom(byteArray);
-  } catch (err) {
-    throw new Error('Not a valid DICOM file');
-  }
+  try { dataSet = dicomParser.parseDicom(byteArray); }
+  catch (err) { throw new Error('Not a valid DICOM file'); }
   const studyUID = dataSet.string('x0020000d');
   const seriesUID = dataSet.string('x0020000e');
   const instanceUID = dataSet.string('x00080018');
@@ -199,9 +210,7 @@ async function uploadOne(file, idx, total, log) {
   const { uploadUrl } = await urlRes.json();
   log(`[${idx}/${total}] ${file.name} — uploading ${formatSize(file.size)}...`);
   const putRes = await fetch(uploadUrl, {
-    method: 'PUT',
-    headers: { 'content-type': 'application/dicom' },
-    body: arrayBuffer,
+    method: 'PUT', headers: { 'content-type': 'application/dicom' }, body: arrayBuffer,
   });
   if (!putRes.ok) throw new Error('PUT failed: HTTP ' + putRes.status);
   log(`[${idx}/${total}] ${file.name} — done`);
@@ -215,6 +224,7 @@ let currentStudyTitle = '';
 
 async function openStudy(studyUID) {
   showViewer();
+  applyModeUI();
   $('viewerTitle').textContent = 'Loading study...';
   $('viewerInfo').textContent = '';
   $('viewerProgress').textContent = '';
@@ -237,18 +247,24 @@ async function openStudy(studyUID) {
     }
 
     currentStudyTitle = description || studyUID;
-    const modeLabel = viewer.isMobileDevice() ? '📱 Mobile' : '🖥️ Desktop (Volume)';
+    const modeLabel = viewer.isMobileDevice() ? '📱 Stack' : '🖥️ MPR (3-plane)';
     $('viewerTitle').innerHTML = `${escapeHtml(currentStudyTitle)} <span style="font-size:0.7em;color:#94a3b8;font-weight:normal;">— ${modeLabel}</span>`;
-    $('viewerInfo').textContent = `Loading...`;
-    $('viewerProgress').textContent = viewer.isMobileDevice()
-      ? 'Loading first slice...'
-      : 'Building 3D volume...';
+    $('viewerInfo').textContent = viewer.isMobileDevice() ? 'Loading...' : 'Loading volume...';
+    $('viewerProgress').textContent = viewer.isMobileDevice() ? 'Loading first slice...' : 'Building 3D volume...';
 
-    const element = $('dicomViewport');
     const total = instances.length;
 
+    // Prepare elements based on mode
+    const elements = viewer.isMobileDevice()
+      ? { stack: $('stackViewport') }
+      : {
+          axial: $('axialViewport'),
+          sagittal: $('sagittalViewport'),
+          coronal: $('coronalViewport'),
+        };
+
     const { mode } = await viewer.loadStudy(
-      element,
+      elements,
       instances,
       (loaded, tot) => {
         const pct = Math.round((loaded / tot) * 100);
@@ -259,11 +275,16 @@ async function openStudy(studyUID) {
           setTimeout(() => ($('viewerProgress').textContent = ''), 2500);
         }
       },
-      (idx) => {
-        if (idx == null || idx < 0) return;
-        $('viewerInfo').textContent = `Slice ${idx + 1} of ${total}`;
-        $('sliceSlider').value = idx;
-        $('sliceValue').textContent = `${idx + 1} / ${total}`;
+      (info) => {
+        // info: { viewportId, orientation, index } for MPR OR { viewportId, index } for stack
+        if (info == null) return;
+        if (mode === 'mpr') {
+          $('viewerInfo').textContent = `${info.orientation || ''}: slice ${info.index + 1}`;
+        } else {
+          $('viewerInfo').textContent = `Slice ${info.index + 1} of ${total}`;
+          $('sliceSlider').value = info.index;
+          $('sliceValue').textContent = `${info.index + 1} / ${total}`;
+        }
       },
       () => {
         const wl = viewer.getWindowLevel();
@@ -275,13 +296,14 @@ async function openStudy(studyUID) {
 
     console.log('Viewer loaded in mode:', mode);
 
-    const slider = $('sliceSlider');
-    slider.max = total - 1;
-    slider.value = 0;
-    $('sliceValue').textContent = `1 / ${total}`;
-    slider.addEventListener('input', () => {
-      viewer.goToSlice(parseInt(slider.value, 10));
-    });
+    // Wire up slider only in stack mode
+    if (mode === 'stack') {
+      const slider = $('sliceSlider');
+      slider.max = total - 1;
+      slider.value = 0;
+      $('sliceValue').textContent = `1 / ${total}`;
+      slider.addEventListener('input', () => viewer.goToSlice(parseInt(slider.value, 10)));
+    }
   } catch (err) {
     $('viewerTitle').textContent = 'Failed to load: ' + err.message;
     $('viewerProgress').textContent = '';
@@ -294,11 +316,11 @@ async function openStudy(studyUID) {
 // ============================================================
 
 async function toggleFullscreen() {
-  const container = $('viewportContainer');
+  // Fullscreen the entire viewer workspace
+  const container = document.querySelector('.viewer-workspace');
   if (!container) return;
   const isRealFullscreen = document.fullscreenElement || document.webkitFullscreenElement;
   const isPseudoFullscreen = container.classList.contains('pseudo-fullscreen');
-
   if (isRealFullscreen || isPseudoFullscreen) {
     if (document.fullscreenElement && document.exitFullscreen) await document.exitFullscreen();
     else if (document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
@@ -308,9 +330,7 @@ async function toggleFullscreen() {
       if (container.requestFullscreen) await container.requestFullscreen();
       else if (container.webkitRequestFullscreen) container.webkitRequestFullscreen();
       else container.classList.add('pseudo-fullscreen');
-    } catch (err) {
-      container.classList.add('pseudo-fullscreen');
-    }
+    } catch (err) { container.classList.add('pseudo-fullscreen'); }
   }
   setTimeout(() => viewer.resize(), 250);
 }
@@ -320,9 +340,7 @@ async function takeScreenshot() {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const safeTitle = currentStudyTitle.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 40) || 'study';
     await viewer.screenshot(`${safeTitle}_${timestamp}.png`);
-  } catch (err) {
-    alert('Screenshot failed: ' + err.message);
-  }
+  } catch (err) { alert('Screenshot failed: ' + err.message); }
 }
 
 // ============================================================
@@ -330,9 +348,7 @@ async function takeScreenshot() {
 // ============================================================
 
 $('loginBtn').addEventListener('click', checkPassword);
-$('passwordInput').addEventListener('keypress', (e) => {
-  if (e.key === 'Enter') checkPassword();
-});
+$('passwordInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') checkPassword(); });
 $('logoutBtn').addEventListener('click', logout);
 $('navStudies').addEventListener('click', showStudies);
 $('navUpload').addEventListener('click', showUpload);
@@ -364,6 +380,9 @@ $$('.preset-btn').forEach((btn) => {
 });
 
 window.addEventListener('resize', () => viewer.resize());
+// Re-apply UI mode on orientation/resize changes (in case someone rotates device)
+window.addEventListener('resize', applyModeUI);
+window.addEventListener('orientationchange', applyModeUI);
 
 if (sessionStorage.getItem(PASSWORD_KEY)) {
   fetch('/api/verify', { headers: authHeaders() }).then((r) => {
