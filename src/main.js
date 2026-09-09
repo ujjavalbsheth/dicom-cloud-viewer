@@ -1,6 +1,6 @@
 // ============================================================
-// DICOM Cloud Viewer — Session 2a
-// Migrated to Cornerstone3D v3 (bundled via Vite)
+// DICOM Cloud Viewer — Session 2b
+// Loads studies as 3D volumes (backend change; UI stays the same as 2a)
 // ============================================================
 
 import * as viewer from './viewer.js';
@@ -220,11 +220,9 @@ async function openStudy(studyUID) {
   $('viewerProgress').textContent = '';
 
   try {
-    // Initialize Cornerstone (idempotent)
     $('viewerProgress').textContent = 'Initializing viewer...';
     await viewer.initViewer();
 
-    // Fetch signed URLs for all instances
     $('viewerProgress').textContent = 'Fetching instance list...';
     const res = await fetch(`/api/list-instances?studyUID=${encodeURIComponent(studyUID)}`, {
       headers: authHeaders(),
@@ -240,31 +238,32 @@ async function openStudy(studyUID) {
 
     currentStudyTitle = description || studyUID;
     $('viewerTitle').textContent = currentStudyTitle;
-    $('viewerInfo').textContent = `Slice 1 of ${instances.length}`;
-    $('viewerProgress').textContent = 'Loading first slice...';
+    $('viewerInfo').textContent = `Loading volume...`;
+    $('viewerProgress').textContent = 'Building 3D volume from slices...';
 
     const element = $('dicomViewport');
+    const total = instances.length;
 
-    // Load study — first slice renders, rest prefetch in background
     await viewer.loadStudy(
       element,
       instances,
-      // onProgress
-      (loaded, total) => {
-        if (loaded < total) {
-          $('viewerProgress').textContent = `Prefetched ${loaded} / ${total} slices`;
-        } else {
-          $('viewerProgress').textContent = 'All slices cached';
-          setTimeout(() => ($('viewerProgress').textContent = ''), 2000);
+      // onVolumeProgress
+      (loaded, tot) => {
+        const pct = Math.round((loaded / tot) * 100);
+        $('viewerProgress').textContent = `Loading volume: ${loaded} / ${tot} slices (${pct}%)`;
+        if (loaded >= tot) {
+          setTimeout(() => ($('viewerProgress').textContent = 'Volume ready'), 300);
+          setTimeout(() => ($('viewerProgress').textContent = ''), 2500);
         }
       },
       // onSliceChange
       (idx) => {
-        $('viewerInfo').textContent = `Slice ${idx + 1} of ${instances.length}`;
+        if (idx == null || idx < 0) return;
+        $('viewerInfo').textContent = `Slice ${idx + 1} of ${total}`;
         $('sliceSlider').value = idx;
-        $('sliceValue').textContent = `${idx + 1} / ${instances.length}`;
+        $('sliceValue').textContent = `${idx + 1} / ${total}`;
       },
-      // onRender (updates W/L and zoom overlays)
+      // onRender
       () => {
         const wl = viewer.getWindowLevel();
         if (wl) $('overlayWL').textContent = `W: ${wl.windowWidth}  L: ${wl.windowCenter}`;
@@ -273,13 +272,11 @@ async function openStudy(studyUID) {
       }
     );
 
-    $('viewerProgress').textContent = '';
-
     // Set up slice slider
     const slider = $('sliceSlider');
-    slider.max = instances.length - 1;
+    slider.max = total - 1;
     slider.value = 0;
-    $('sliceValue').textContent = `1 / ${instances.length}`;
+    $('sliceValue').textContent = `1 / ${total}`;
     slider.addEventListener('input', () => {
       viewer.goToSlice(parseInt(slider.value, 10));
     });
@@ -297,31 +294,22 @@ async function openStudy(studyUID) {
 async function toggleFullscreen() {
   const container = $('viewportContainer');
   if (!container) return;
-
   const isRealFullscreen = document.fullscreenElement || document.webkitFullscreenElement;
   const isPseudoFullscreen = container.classList.contains('pseudo-fullscreen');
 
   if (isRealFullscreen || isPseudoFullscreen) {
-    if (document.fullscreenElement && document.exitFullscreen) {
-      await document.exitFullscreen();
-    } else if (document.webkitFullscreenElement && document.webkitExitFullscreen) {
-      document.webkitExitFullscreen();
-    }
+    if (document.fullscreenElement && document.exitFullscreen) await document.exitFullscreen();
+    else if (document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
     container.classList.remove('pseudo-fullscreen');
   } else {
     try {
-      if (container.requestFullscreen) {
-        await container.requestFullscreen();
-      } else if (container.webkitRequestFullscreen) {
-        container.webkitRequestFullscreen();
-      } else {
-        container.classList.add('pseudo-fullscreen');
-      }
+      if (container.requestFullscreen) await container.requestFullscreen();
+      else if (container.webkitRequestFullscreen) container.webkitRequestFullscreen();
+      else container.classList.add('pseudo-fullscreen');
     } catch (err) {
       container.classList.add('pseudo-fullscreen');
     }
   }
-
   setTimeout(() => viewer.resize(), 250);
 }
 
@@ -349,7 +337,6 @@ $('navUpload').addEventListener('click', showUpload);
 $('folderMode').addEventListener('change', toggleFolderMode);
 $('uploadBtn').addEventListener('click', startUpload);
 
-// Tool buttons (select active tool)
 $$('.tool-btn[data-tool]').forEach((btn) => {
   btn.addEventListener('click', () => {
     viewer.setActiveTool(btn.dataset.tool);
@@ -357,7 +344,6 @@ $$('.tool-btn[data-tool]').forEach((btn) => {
   });
 });
 
-// Action buttons
 $$('.tool-btn[data-action]').forEach((btn) => {
   btn.addEventListener('click', () => {
     const action = btn.dataset.action;
@@ -371,15 +357,12 @@ $$('.tool-btn[data-action]').forEach((btn) => {
   });
 });
 
-// Preset buttons
 $$('.preset-btn').forEach((btn) => {
   btn.addEventListener('click', () => viewer.applyPreset(btn.dataset.preset));
 });
 
-// Resize handler
 window.addEventListener('resize', () => viewer.resize());
 
-// Auto-enter if session valid
 if (sessionStorage.getItem(PASSWORD_KEY)) {
   fetch('/api/verify', { headers: authHeaders() }).then((r) => {
     if (r.ok) enterApp();
