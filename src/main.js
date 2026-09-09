@@ -1,6 +1,6 @@
 // ============================================================
-// DICOM Cloud Viewer — Session 2b
-// Loads studies as 3D volumes (backend change; UI stays the same as 2a)
+// DICOM Cloud Viewer — Session 2b Mobile Fix
+// Dual mode: stack on mobile, volume on desktop
 // ============================================================
 
 import * as viewer from './viewer.js';
@@ -237,33 +237,34 @@ async function openStudy(studyUID) {
     }
 
     currentStudyTitle = description || studyUID;
-    $('viewerTitle').textContent = currentStudyTitle;
-    $('viewerInfo').textContent = `Loading volume...`;
-    $('viewerProgress').textContent = 'Building 3D volume from slices...';
+    const modeLabel = viewer.isMobileDevice() ? '📱 Mobile' : '🖥️ Desktop (Volume)';
+    $('viewerTitle').innerHTML = `${escapeHtml(currentStudyTitle)} <span style="font-size:0.7em;color:#94a3b8;font-weight:normal;">— ${modeLabel}</span>`;
+    $('viewerInfo').textContent = `Loading...`;
+    $('viewerProgress').textContent = viewer.isMobileDevice()
+      ? 'Loading first slice...'
+      : 'Building 3D volume...';
 
     const element = $('dicomViewport');
     const total = instances.length;
 
-    await viewer.loadStudy(
+    const { mode } = await viewer.loadStudy(
       element,
       instances,
-      // onVolumeProgress
       (loaded, tot) => {
         const pct = Math.round((loaded / tot) * 100);
-        $('viewerProgress').textContent = `Loading volume: ${loaded} / ${tot} slices (${pct}%)`;
-        if (loaded >= tot) {
-          setTimeout(() => ($('viewerProgress').textContent = 'Volume ready'), 300);
+        if (loaded < tot) {
+          $('viewerProgress').textContent = `${loaded} / ${tot} slices (${pct}%)`;
+        } else {
+          $('viewerProgress').textContent = 'All slices cached';
           setTimeout(() => ($('viewerProgress').textContent = ''), 2500);
         }
       },
-      // onSliceChange
       (idx) => {
         if (idx == null || idx < 0) return;
         $('viewerInfo').textContent = `Slice ${idx + 1} of ${total}`;
         $('sliceSlider').value = idx;
         $('sliceValue').textContent = `${idx + 1} / ${total}`;
       },
-      // onRender
       () => {
         const wl = viewer.getWindowLevel();
         if (wl) $('overlayWL').textContent = `W: ${wl.windowWidth}  L: ${wl.windowCenter}`;
@@ -272,7 +273,8 @@ async function openStudy(studyUID) {
       }
     );
 
-    // Set up slice slider
+    console.log('Viewer loaded in mode:', mode);
+
     const slider = $('sliceSlider');
     slider.max = total - 1;
     slider.value = 0;
