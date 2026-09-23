@@ -194,28 +194,44 @@ async function loadAsMPR(elements, onProgress, onSliceChange, onRender, onVolume
     imageIds: currentImageIds,
   });
 
-  let loaded = 0;
   const total = currentImageIds.length;
   if (onProgress) onProgress(0, total);
-  Object.values(currentViewports).forEach((vp) => {
-    vp.element.addEventListener(Enums.Events.IMAGE_LOADED, () => {
-      loaded++;
-      if (loaded <= total && loaded % 10 === 0) onProgress && onProgress(loaded, total);
-    });
-  });
-  // When all slices loaded, notify curved MPR module
-  const readyCheck = setInterval(() => {
-    if (loaded >= total) {
-      onProgress && onProgress(total, total);
-      if (onVolumeReady) {
-        try { onVolumeReady(currentVolumeId); } catch (e) { console.error(e); }
-      }
-      clearInterval(readyCheck);
-    }
-  }, 1000);
-  setTimeout(() => clearInterval(readyCheck), 180000);
 
-  volume.load();
+  // Poll the volume's cachedFrames array — Cornerstone3D v3 marks each frame as loaded here.
+  // This is more reliable than listening for events across viewports.
+  const poll = setInterval(() => {
+    let loaded = 0;
+    try {
+      const cf = volume.cachedFrames;
+      if (Array.isArray(cf)) {
+        for (let i = 0; i < cf.length; i++) if (cf[i]) loaded++;
+      }
+    } catch (e) {}
+    if (onProgress) onProgress(loaded, total);
+    if (loaded >= total) {
+      clearInterval(poll);
+      console.log('Volume fully loaded, firing onVolumeReady');
+      if (onVolumeReady) {
+        try { onVolumeReady(currentVolumeId); } catch (e) { console.error('onVolumeReady error:', e); }
+      }
+    }
+  }, 500);
+  setTimeout(() => clearInterval(poll), 240000);
+
+  // Kick off pixel loading. .load() returns a promise that resolves when ALL slices are in.
+  volume.load(() => {
+    // Callback fires per-frame during progressive loading (not needed here — poll handles it)
+  }).then(() => {
+    // Fires once all frames loaded — belt-and-braces alongside the poll
+    clearInterval(poll);
+    if (onProgress) onProgress(total, total);
+    console.log('Volume.load() resolved, firing onVolumeReady');
+    if (onVolumeReady) {
+      try { onVolumeReady(currentVolumeId); } catch (e) { console.error('onVolumeReady error:', e); }
+    }
+  }).catch((err) => {
+    console.error('volume.load() failed:', err);
+  });
 
   await setVolumesForViewports(
     renderingEngine,
