@@ -1,7 +1,6 @@
 // ============================================================
-// Cornerstone3D v3 — MPR Viewer (Session 2c)
-// Desktop: 3 volume viewports (Axial + Sagittal + Coronal) with crosshairs
-// Mobile:  single stack viewport (as Session 2b)
+// Cornerstone3D v3 — MPR Viewer (Session 3a)
+// Same as 2c + exposes volume/viewport getters for curved MPR module
 // ============================================================
 
 import {
@@ -12,6 +11,7 @@ import {
   volumeLoader,
   setVolumesForViewports,
   cache,
+  utilities as coreUtilities,
 } from '@cornerstonejs/core';
 import {
   init as toolsInit,
@@ -46,9 +46,9 @@ let renderingEngine = null;
 let toolGroup = null;
 let currentVolumeId = null;
 let currentImageIds = [];
-let currentMode = null; // 'stack' | 'mpr'
-let currentViewports = {}; // { AXIAL: viewport, SAGITTAL: viewport, CORONAL: viewport } OR { STACK: viewport }
-let activeViewportId = null; // The viewport whose actions/presets currently apply
+let currentMode = null;
+let currentViewports = {};
+let activeViewportId = null;
 
 // ============================================================
 // Mobile detection
@@ -61,9 +61,7 @@ export function isMobileDevice() {
   return hasTouch && (coarsePointer || narrowScreen);
 }
 
-export function getViewerMode() {
-  return currentMode;
-}
+export function getViewerMode() { return currentMode; }
 
 // ============================================================
 // Initialization
@@ -71,14 +69,11 @@ export function getViewerMode() {
 
 export async function initViewer() {
   if (initialized) return;
-
   await coreInit();
   await toolsInit();
-
   cornerstoneDICOMImageLoader.init({
     maxWebWorkers: Math.max(1, (navigator.hardwareConcurrency || 4) - 1),
   });
-
   addTool(WindowLevelTool);
   addTool(PanTool);
   addTool(ZoomTool);
@@ -86,28 +81,18 @@ export async function initViewer() {
   addTool(LengthTool);
   addTool(AngleTool);
   addTool(CrosshairsTool);
-
   initialized = true;
 }
 
 // ============================================================
-// Load study — picks stack (mobile) or MPR (desktop)
+// Load study
 // ============================================================
 
-/**
- * @param {Object} elements - Either {stack: HTMLElement} OR {axial, sagittal, coronal: HTMLElement}
- * @param {Array<{url}>} instances
- * @param {function} onProgress
- * @param {function} onSliceChange
- * @param {function} onRender
- */
-export async function loadStudy(elements, instances, onProgress, onSliceChange, onRender) {
+export async function loadStudy(elements, instances, onProgress, onSliceChange, onRender, onVolumeReady) {
   if (!initialized) throw new Error('Call initViewer() first');
-
   cleanup();
   currentImageIds = instances.map((inst) => `wadouri:${inst.url}`);
   currentMode = isMobileDevice() ? 'stack' : 'mpr';
-
   renderingEngine = new RenderingEngine(RENDERING_ENGINE_ID);
 
   try { ToolGroupManager.destroyToolGroup(TOOL_GROUP_ID); } catch (e) {}
@@ -127,15 +112,10 @@ export async function loadStudy(elements, instances, onProgress, onSliceChange, 
       throw new Error('MPR mode requires elements.axial, .sagittal, .coronal');
     }
     toolGroup.addTool(CrosshairsTool.toolName);
-    await loadAsMPR(elements, onProgress, onSliceChange, onRender);
+    await loadAsMPR(elements, onProgress, onSliceChange, onRender, onVolumeReady);
   }
-
   return { mode: currentMode, imageIds: currentImageIds };
 }
-
-// ============================================================
-// Stack loading (mobile)
-// ============================================================
 
 async function loadAsStack(element, onProgress, onSliceChange, onRender) {
   const viewportInput = {
@@ -148,13 +128,10 @@ async function loadAsStack(element, onProgress, onSliceChange, onRender) {
   const viewport = renderingEngine.getViewport(STACK_VIEWPORT_ID);
   currentViewports = { STACK: viewport };
   activeViewportId = STACK_VIEWPORT_ID;
-
   toolGroup.addViewport(STACK_VIEWPORT_ID, RENDERING_ENGINE_ID);
   configureToolBindings();
-
   await viewport.setStack(currentImageIds, 0);
   viewport.render();
-
   element.addEventListener(Enums.Events.STACK_NEW_IMAGE, () => {
     if (onSliceChange) {
       try {
@@ -163,13 +140,11 @@ async function loadAsStack(element, onProgress, onSliceChange, onRender) {
       } catch (e) {}
     }
   });
-
   if (onRender) {
     element.addEventListener(Enums.Events.IMAGE_RENDERED, () => {
       try { onRender(viewport); } catch (e) {}
     });
   }
-
   prefetchStackSlices(currentImageIds, onProgress);
 }
 
@@ -190,76 +165,55 @@ async function prefetchStackSlices(imageIds, onProgress) {
   if (onProgress) onProgress(total, total);
 }
 
-// ============================================================
-// MPR loading (desktop) — 3 orthogonal volume viewports
-// ============================================================
-
-async function loadAsMPR(elements, onProgress, onSliceChange, onRender) {
+async function loadAsMPR(elements, onProgress, onSliceChange, onRender, onVolumeReady) {
   currentVolumeId = VOLUME_ID_PREFIX + 'STUDY_' + Date.now();
 
   const viewportInputs = [
-    {
-      viewportId: VIEWPORT_IDS.AXIAL,
-      type: ViewportType.ORTHOGRAPHIC,
-      element: elements.axial,
-      defaultOptions: { orientation: OrientationAxis.AXIAL, background: [0, 0, 0] },
-    },
-    {
-      viewportId: VIEWPORT_IDS.SAGITTAL,
-      type: ViewportType.ORTHOGRAPHIC,
-      element: elements.sagittal,
-      defaultOptions: { orientation: OrientationAxis.SAGITTAL, background: [0, 0, 0] },
-    },
-    {
-      viewportId: VIEWPORT_IDS.CORONAL,
-      type: ViewportType.ORTHOGRAPHIC,
-      element: elements.coronal,
-      defaultOptions: { orientation: OrientationAxis.CORONAL, background: [0, 0, 0] },
-    },
+    { viewportId: VIEWPORT_IDS.AXIAL,    type: ViewportType.ORTHOGRAPHIC, element: elements.axial,
+      defaultOptions: { orientation: OrientationAxis.AXIAL,    background: [0,0,0] } },
+    { viewportId: VIEWPORT_IDS.SAGITTAL, type: ViewportType.ORTHOGRAPHIC, element: elements.sagittal,
+      defaultOptions: { orientation: OrientationAxis.SAGITTAL, background: [0,0,0] } },
+    { viewportId: VIEWPORT_IDS.CORONAL,  type: ViewportType.ORTHOGRAPHIC, element: elements.coronal,
+      defaultOptions: { orientation: OrientationAxis.CORONAL,  background: [0,0,0] } },
   ];
 
   renderingEngine.setViewports(viewportInputs);
-
   currentViewports = {
-    AXIAL: renderingEngine.getViewport(VIEWPORT_IDS.AXIAL),
+    AXIAL:    renderingEngine.getViewport(VIEWPORT_IDS.AXIAL),
     SAGITTAL: renderingEngine.getViewport(VIEWPORT_IDS.SAGITTAL),
-    CORONAL: renderingEngine.getViewport(VIEWPORT_IDS.CORONAL),
+    CORONAL:  renderingEngine.getViewport(VIEWPORT_IDS.CORONAL),
   };
-  activeViewportId = VIEWPORT_IDS.AXIAL; // Default active
+  activeViewportId = VIEWPORT_IDS.AXIAL;
 
-  // Add all three viewports to the same tool group
-  toolGroup.addViewport(VIEWPORT_IDS.AXIAL, RENDERING_ENGINE_ID);
+  toolGroup.addViewport(VIEWPORT_IDS.AXIAL,    RENDERING_ENGINE_ID);
   toolGroup.addViewport(VIEWPORT_IDS.SAGITTAL, RENDERING_ENGINE_ID);
-  toolGroup.addViewport(VIEWPORT_IDS.CORONAL, RENDERING_ENGINE_ID);
+  toolGroup.addViewport(VIEWPORT_IDS.CORONAL,  RENDERING_ENGINE_ID);
   configureToolBindings();
 
-  // Create volume
   const volume = await volumeLoader.createAndCacheVolume(currentVolumeId, {
     imageIds: currentImageIds,
   });
 
-  // Progress: count image loads (fires once per slice as it enters the volume)
-  if (onProgress) {
-    onProgress(0, currentImageIds.length);
-    let loaded = 0;
-    // Listen on the rendering engine's events (image loaded is a global event on cache)
-    Object.values(currentViewports).forEach((vp) => {
-      vp.element.addEventListener(Enums.Events.IMAGE_LOADED, () => {
-        loaded++;
-        if (loaded <= currentImageIds.length && loaded % 10 === 0) {
-          onProgress(loaded, currentImageIds.length);
-        }
-      });
+  let loaded = 0;
+  const total = currentImageIds.length;
+  if (onProgress) onProgress(0, total);
+  Object.values(currentViewports).forEach((vp) => {
+    vp.element.addEventListener(Enums.Events.IMAGE_LOADED, () => {
+      loaded++;
+      if (loaded <= total && loaded % 10 === 0) onProgress && onProgress(loaded, total);
     });
-    // Also listen for the final ready state
-    const check = setInterval(() => {
-      if (loaded >= currentImageIds.length) {
-        onProgress(currentImageIds.length, currentImageIds.length);
-        clearInterval(check);
+  });
+  // When all slices loaded, notify curved MPR module
+  const readyCheck = setInterval(() => {
+    if (loaded >= total) {
+      onProgress && onProgress(total, total);
+      if (onVolumeReady) {
+        try { onVolumeReady(currentVolumeId); } catch (e) { console.error(e); }
       }
-    }, 1000);
-    setTimeout(() => clearInterval(check), 120000);
-  }
+      clearInterval(readyCheck);
+    }
+  }, 1000);
+  setTimeout(() => clearInterval(readyCheck), 180000);
 
   volume.load();
 
@@ -269,14 +223,10 @@ async function loadAsMPR(elements, onProgress, onSliceChange, onRender) {
     [VIEWPORT_IDS.AXIAL, VIEWPORT_IDS.SAGITTAL, VIEWPORT_IDS.CORONAL]
   );
 
-  // Render all
   renderingEngine.renderViewports([
-    VIEWPORT_IDS.AXIAL,
-    VIEWPORT_IDS.SAGITTAL,
-    VIEWPORT_IDS.CORONAL,
+    VIEWPORT_IDS.AXIAL, VIEWPORT_IDS.SAGITTAL, VIEWPORT_IDS.CORONAL,
   ]);
 
-  // Slice-change event (each viewport reports its own current slice)
   Object.entries(currentViewports).forEach(([label, vp]) => {
     vp.element.addEventListener(Enums.Events.CAMERA_MODIFIED, () => {
       if (onSliceChange) {
@@ -286,68 +236,33 @@ async function loadAsMPR(elements, onProgress, onSliceChange, onRender) {
         } catch (e) {}
       }
     });
-
     if (onRender) {
       vp.element.addEventListener(Enums.Events.IMAGE_RENDERED, () => {
         try { onRender(vp); } catch (e) {}
       });
     }
-
-    // Click on a viewport to make it "active" (its state feeds the overlays)
-    vp.element.addEventListener('click', () => {
-      activeViewportId = vp.id;
-    });
+    vp.element.addEventListener('click', () => { activeViewportId = vp.id; });
   });
 }
-
-// ============================================================
-// Tool bindings
-// ============================================================
 
 function configureToolBindings() {
-  toolGroup.setToolActive(WindowLevelTool.toolName, {
-    bindings: [{ mouseButton: MouseBindings.Primary }],
-  });
-  toolGroup.setToolActive(PanTool.toolName, {
-    bindings: [{ mouseButton: MouseBindings.Auxiliary }],
-  });
-  toolGroup.setToolActive(ZoomTool.toolName, {
-    bindings: [{ mouseButton: MouseBindings.Secondary }],
-  });
-  toolGroup.setToolActive(StackScrollTool.toolName, {
-    bindings: [{ mouseButton: MouseBindings.Wheel }],
-  });
+  toolGroup.setToolActive(WindowLevelTool.toolName, { bindings: [{ mouseButton: MouseBindings.Primary }] });
+  toolGroup.setToolActive(PanTool.toolName,          { bindings: [{ mouseButton: MouseBindings.Auxiliary }] });
+  toolGroup.setToolActive(ZoomTool.toolName,         { bindings: [{ mouseButton: MouseBindings.Secondary }] });
+  toolGroup.setToolActive(StackScrollTool.toolName,  { bindings: [{ mouseButton: MouseBindings.Wheel }] });
 }
-
-// ============================================================
-// Tool switching
-// ============================================================
 
 const DRAG_TOOLS = ['WindowLevel', 'Pan', 'Zoom', 'StackScroll', 'Length', 'Angle', 'Crosshairs'];
 
 export function setActiveTool(toolName) {
   if (!toolGroup) return;
-
-  // If someone tries to activate Crosshairs but we're in stack mode, warn and skip
-  if (toolName === 'Crosshairs' && currentMode !== 'mpr') {
-    console.warn('Crosshairs tool only available in MPR mode');
-    return;
-  }
-
+  if (toolName === 'Crosshairs' && currentMode !== 'mpr') return;
   DRAG_TOOLS.forEach((name) => {
     try { toolGroup.setToolPassive(name); } catch (e) {}
   });
-
-  toolGroup.setToolActive(toolName, {
-    bindings: [{ mouseButton: MouseBindings.Primary }],
-  });
-
+  toolGroup.setToolActive(toolName, { bindings: [{ mouseButton: MouseBindings.Primary }] });
   configureToolBindings();
 }
-
-// ============================================================
-// Transform actions — operate on active viewport
-// ============================================================
 
 function getActiveViewport() {
   if (!renderingEngine || !activeViewportId) return null;
@@ -371,7 +286,6 @@ export function flipH() {
   vp.setCamera({ ...camera, flipHorizontal: !camera.flipHorizontal });
   vp.render();
 }
-
 export function flipV() {
   const vp = getActiveViewport();
   if (!vp) return;
@@ -379,16 +293,13 @@ export function flipV() {
   vp.setCamera({ ...camera, flipVertical: !camera.flipVertical });
   vp.render();
 }
-
 export function invert() {
-  // Invert applies to all viewports (all render the same volume)
   Object.values(currentViewports).forEach((vp) => {
     const properties = vp.getProperties();
     vp.setProperties({ invert: !properties.invert });
     vp.render();
   });
 }
-
 export function reset() {
   Object.values(currentViewports).forEach((vp) => {
     vp.resetCamera();
@@ -396,10 +307,6 @@ export function reset() {
     vp.render();
   });
 }
-
-// ============================================================
-// Presets — applied to all viewports
-// ============================================================
 
 const PRESETS = {
   bone: [2000, 400],
@@ -412,61 +319,40 @@ export function applyPreset(name) {
   if (!PRESETS[name]) return;
   const [ww, wc] = PRESETS[name];
   Object.values(currentViewports).forEach((vp) => {
-    vp.setProperties({
-      voiRange: { lower: wc - ww / 2, upper: wc + ww / 2 },
-    });
+    vp.setProperties({ voiRange: { lower: wc - ww / 2, upper: wc + ww / 2 } });
     vp.render();
   });
 }
 
-// ============================================================
-// Slice control — for stack mode only (MPR uses crosshair/scroll per viewport)
-// ============================================================
-
 export function goToSlice(index) {
   const vp = getActiveViewport();
   if (!vp) return;
-  try {
-    if (vp.setImageIdIndex) vp.setImageIdIndex(index);
-  } catch (e) {}
+  try { if (vp.setImageIdIndex) vp.setImageIdIndex(index); } catch (e) {}
 }
-
 export function getCurrentSliceIndex() {
   const vp = getActiveViewport();
   if (!vp) return 0;
   try { return vp.getCurrentImageIdIndex(); } catch (e) { return 0; }
 }
 
-// ============================================================
-// Overlay readouts (from active viewport)
-// ============================================================
-
 export function getWindowLevel() {
   const vp = getActiveViewport();
   if (!vp) return null;
   try {
-    const properties = vp.getProperties();
-    if (!properties || !properties.voiRange) return null;
-    const { lower, upper } = properties.voiRange;
-    return {
-      windowWidth: Math.round(upper - lower),
-      windowCenter: Math.round((upper + lower) / 2),
-    };
+    const p = vp.getProperties();
+    if (!p || !p.voiRange) return null;
+    const { lower, upper } = p.voiRange;
+    return { windowWidth: Math.round(upper - lower), windowCenter: Math.round((upper + lower) / 2) };
   } catch (e) { return null; }
 }
-
 export function getZoom() {
   const vp = getActiveViewport();
   if (!vp) return null;
   try {
-    const camera = vp.getCamera();
-    return camera.parallelScale ? Math.round((1 / camera.parallelScale) * 100) : null;
+    const c = vp.getCamera();
+    return c.parallelScale ? Math.round((1 / c.parallelScale) * 100) : null;
   } catch (e) { return null; }
 }
-
-// ============================================================
-// Cleanup
-// ============================================================
 
 export function cleanup() {
   if (renderingEngine) {
@@ -485,10 +371,6 @@ export function cleanup() {
   currentMode = null;
 }
 
-// ============================================================
-// Screenshot — from the active viewport
-// ============================================================
-
 export async function screenshot(filename) {
   const vp = getActiveViewport();
   if (!vp) return;
@@ -499,13 +381,9 @@ export async function screenshot(filename) {
       if (!blob) return reject(new Error('Failed to create blob'));
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      resolve();
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url); resolve();
     }, 'image/png');
   });
 }
@@ -517,3 +395,51 @@ export function resize() {
 }
 
 export function getImageIdCount() { return currentImageIds.length; }
+
+// ============================================================
+// Getters for curved MPR module (Session 3a)
+// ============================================================
+
+export function getVolumeId() {
+  return currentVolumeId;
+}
+
+export function getAxialViewport() {
+  return currentViewports.AXIAL || null;
+}
+
+export function getAxialElement() {
+  return currentViewports.AXIAL ? currentViewports.AXIAL.element : null;
+}
+
+export function getAxialCurrentSlice() {
+  if (!currentViewports.AXIAL) return null;
+  try { return currentViewports.AXIAL.getCurrentImageIdIndex(); } catch (e) { return null; }
+}
+
+/**
+ * Convert a canvas pixel (x, y) on the axial viewport to a world coordinate (with current Z of axial slice)
+ */
+export function axialCanvasToWorld(canvasX, canvasY) {
+  const vp = currentViewports.AXIAL;
+  if (!vp) return null;
+  try {
+    // Cornerstone3D: canvasToWorld([x, y]) returns [worldX, worldY, worldZ]
+    return vp.canvasToWorld([canvasX, canvasY]);
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Convert world coord to canvas pixel on axial viewport
+ */
+export function axialWorldToCanvas(worldPoint) {
+  const vp = currentViewports.AXIAL;
+  if (!vp) return null;
+  try {
+    return vp.worldToCanvas(worldPoint);
+  } catch (e) {
+    return null;
+  }
+}
