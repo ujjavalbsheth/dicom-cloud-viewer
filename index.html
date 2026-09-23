@@ -56,7 +56,7 @@
 
           <section id="viewerView" class="hidden viewer-section">
             <div class="mobile-hint" id="mobileHint">
-              💡 <strong>Mobile tip:</strong> rotate to landscape for the viewer.
+              💡 <strong>Mobile tip:</strong> rotate to landscape for the viewer. Curved MPR / panorama requires desktop.
             </div>
             <div class="viewer-header">
               <h2 id="viewerTitle">Loading...</h2>
@@ -106,7 +106,7 @@
                   <button class="tool-btn" data-action="flipV" title="Flip vertical">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M8 8l4-4 4 4M8 16l4 4 4-4"/></svg>
                   </button>
-                  <button class="tool-btn" data-action="invert" title="Invert colors">
+                  <button class="tool-btn" data-action="invert" title="Invert">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg>
                   </button>
                 </div>
@@ -120,7 +120,7 @@
                   <button class="tool-btn" data-action="fullscreen" title="Fullscreen">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
                   </button>
-                  <button class="tool-btn" data-action="screenshot" title="Screenshot active view">
+                  <button class="tool-btn" data-action="screenshot" title="Screenshot">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M8 11l4 4 4-4M4 17v3h16v-3"/></svg>
                   </button>
                 </div>
@@ -135,7 +135,6 @@
                   <button class="preset-btn" data-preset="air">Air</button>
                 </div>
 
-                <!-- Desktop: 2x2 MPR grid -->
                 <div class="mpr-grid" id="mprGrid">
                   <div class="mpr-cell">
                     <div class="mpr-label">Axial</div>
@@ -155,7 +154,6 @@
                   </div>
                 </div>
 
-                <!-- Mobile: single stack viewport -->
                 <div class="stack-container" id="stackContainer">
                   <div id="stackViewport" class="stack-viewport" oncontextmenu="return false"></div>
                 </div>
@@ -173,9 +171,38 @@
               </div>
             </div>
 
+            <!-- Curved MPR / Panorama panel (desktop only) -->
+            <div class="curved-mpr-panel hidden desktop-only" id="curvedMPRPanel">
+              <div class="cmpr-header">
+                <h3>Curved MPR (Panoramic Reformat)</h3>
+                <div class="cmpr-controls">
+                  <button id="drawCurveBtn" disabled>Draw Arch Curve</button>
+                  <button id="clearCurveBtn">Clear</button>
+                  <label>
+                    Slab thickness:
+                    <select id="slabThickness">
+                      <option value="5">5 mm (sharp)</option>
+                      <option value="10" selected>10 mm (standard)</option>
+                      <option value="20">20 mm (OPG-like)</option>
+                    </select>
+                  </label>
+                  <button id="renderPanoramaBtn" disabled>Render Panorama</button>
+                  <span class="muted" id="curvePointCount">0 points</span>
+                </div>
+              </div>
+              <div class="curve-help hidden" id="curveHelp">
+                🖱️ Click axial view to add points along the dental arch. Drag to move. Right-click to delete. Need at least 2 points.
+              </div>
+              <div class="panorama-container">
+                <canvas id="panoramaCanvas" class="panorama-canvas"></canvas>
+              </div>
+              <div class="panorama-status muted" id="panoramaStatus">No curve drawn yet.</div>
+            </div>
+
             <div class="viewer-help">
-              <div><strong>Desktop MPR:</strong> click a viewport to make it active. Mouse wheel scrolls that view. Use Crosshairs tool to link all three views.</div>
-              <div><strong>Mobile:</strong> tap a tool, then touch-drag on image. Rotate to landscape for best experience.</div>
+              <div class="desktop-only"><strong>Desktop MPR:</strong> click a viewport to make it active. Mouse wheel scrolls. Use Crosshairs tool to link all three views.</div>
+              <div class="desktop-only"><strong>Curved MPR:</strong> click "Draw Arch Curve", then click points along the dental arch on the axial view. Then render the panorama.</div>
+              <div class="mobile-only"><strong>Mobile:</strong> tap a tool, then touch-drag on image. Rotate to landscape for best experience.</div>
             </div>
           </section>
         </main>
