@@ -1,5 +1,5 @@
 /* ============================================================
-   DICOM Cloud Viewer — dark theme
+   DICOM Cloud Viewer — dark theme (Session 3a)
    ============================================================ */
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -19,79 +19,56 @@ body {
 .error { color: #f87171; font-size: 0.9rem; margin-top: 0.75rem; }
 
 .warning {
-  background: #422006;
-  border: 1px solid #92400e;
-  color: #fcd34d;
-  padding: 0.75rem 1rem;
-  border-radius: 6px;
-  margin-bottom: 1rem;
-  font-size: 0.9rem;
+  background: #422006; border: 1px solid #92400e; color: #fcd34d;
+  padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-size: 0.9rem;
 }
 
 .mobile-hint {
   display: none;
-  background: #172554;
-  border: 1px solid #1e40af;
-  color: #93c5fd;
-  padding: 0.6rem 1rem;
-  border-radius: 6px;
-  margin-bottom: 0.75rem;
-  font-size: 0.85rem;
+  background: #172554; border: 1px solid #1e40af; color: #93c5fd;
+  padding: 0.6rem 1rem; border-radius: 6px; margin-bottom: 0.75rem; font-size: 0.85rem;
 }
 
-/* ============ Password gate ============ */
-
+/* Password gate */
 .gate { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1rem; }
 .gate-card {
-  background: #1e293b;
-  padding: 2.5rem;
-  border-radius: 12px;
-  max-width: 400px; width: 100%;
-  box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+  background: #1e293b; padding: 2.5rem; border-radius: 12px;
+  max-width: 400px; width: 100%; box-shadow: 0 10px 40px rgba(0,0,0,0.5);
 }
 .gate-card h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
 .gate-card p.muted { margin-bottom: 1.5rem; }
 .gate-card input {
-  width: 100%; padding: 0.75rem 1rem;
-  background: #334155; border: 1px solid #475569; border-radius: 6px;
-  color: #f1f5f9; font-size: 1rem; outline: none; margin-bottom: 1rem;
+  width: 100%; padding: 0.75rem 1rem; background: #334155;
+  border: 1px solid #475569; border-radius: 6px; color: #f1f5f9;
+  font-size: 1rem; outline: none; margin-bottom: 1rem;
 }
 .gate-card input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.2); }
 .gate-card button {
-  width: 100%; padding: 0.75rem;
-  background: #2563eb; color: white; border: none; border-radius: 6px;
-  font-size: 1rem; font-weight: 500; cursor: pointer; transition: background 0.15s;
+  width: 100%; padding: 0.75rem; background: #2563eb; color: white;
+  border: none; border-radius: 6px; font-size: 1rem; font-weight: 500;
+  cursor: pointer; transition: background 0.15s;
 }
 .gate-card button:hover { background: #1d4ed8; }
 
-/* ============ Header ============ */
-
+/* Header */
 header {
-  border-bottom: 1px solid #334155;
-  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #334155; padding: 0.75rem 1rem;
   display: flex; justify-content: space-between; align-items: center;
   gap: 0.5rem; flex-wrap: wrap;
 }
 header h1 { font-size: 1.1rem; }
 nav { display: flex; gap: 0.5rem; }
-
 .link {
   background: none; border: none; color: #60a5fa; cursor: pointer;
   font-size: 0.9rem; padding: 0.4rem 0.7rem; border-radius: 4px; transition: background 0.15s;
 }
 .link:hover, .link:active { background: #1e293b; }
 
-main {
-  padding: 1.5rem 1rem;
-  max-width: 900px;
-  margin: 0 auto;
-}
+main { padding: 1.5rem 1rem; max-width: 900px; margin: 0 auto; }
 .viewer-section { max-width: 1600px; padding: 1rem; }
-
 h2 { font-size: 1.4rem; margin-bottom: 1rem; }
 
-/* ============ Studies list ============ */
-
+/* Studies */
 .studies-list { display: grid; gap: 0.75rem; margin-top: 1rem; }
 .study-card {
   background: #1e293b; padding: 1rem 1.25rem; border-radius: 8px;
@@ -109,13 +86,12 @@ h2 { font-size: 1.4rem; margin-bottom: 1rem; }
   text-align: center; color: #94a3b8;
 }
 
-/* ============ Upload ============ */
-
+/* Upload */
 .upload-card { background: #1e293b; padding: 1.5rem; border-radius: 8px; margin-bottom: 1rem; }
 .upload-card input[type='file'] {
-  display: block; width: 100%; padding: 0.5rem;
-  background: #334155; border: 1px solid #475569; border-radius: 6px;
-  color: #f1f5f9; margin-bottom: 1rem; font-size: 0.9rem;
+  display: block; width: 100%; padding: 0.5rem; background: #334155;
+  border: 1px solid #475569; border-radius: 6px; color: #f1f5f9;
+  margin-bottom: 1rem; font-size: 0.9rem;
 }
 .folder-toggle {
   display: flex; align-items: center; gap: 0.5rem;
@@ -136,24 +112,15 @@ h2 { font-size: 1.4rem; margin-bottom: 1rem; }
   max-height: 400px; overflow-y: auto;
 }
 
-/* ============================================================
-   Viewer
-   ============================================================ */
-
+/* Viewer */
 .viewer-header { margin-bottom: 0.75rem; }
 .viewer-header h2 {
   font-size: 1.2rem; margin-bottom: 0.25rem;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.viewer-info-row {
-  display: flex; gap: 1rem; font-size: 0.85rem; flex-wrap: wrap;
-}
+.viewer-info-row { display: flex; gap: 1rem; font-size: 0.85rem; flex-wrap: wrap; }
+.viewer-workspace { display: flex; gap: 0.75rem; min-height: 65vh; }
 
-.viewer-workspace {
-  display: flex; gap: 0.75rem; min-height: 65vh;
-}
-
-/* Toolbar (vertical desktop) */
 .toolbar {
   display: flex; flex-direction: column; gap: 0.25rem;
   background: #1e293b; padding: 0.5rem; border-radius: 8px; flex-shrink: 0;
@@ -179,9 +146,8 @@ h2 { font-size: 1.4rem; margin-bottom: 1rem; }
 
 .preset-bar {
   display: flex; gap: 0.4rem; align-items: center;
-  padding: 0.5rem 0.75rem;
-  background: #1e293b; border-radius: 8px 8px 0 0;
-  flex-wrap: wrap;
+  padding: 0.5rem 0.75rem; background: #1e293b;
+  border-radius: 8px 8px 0 0; flex-wrap: wrap;
 }
 .preset-label { color: #94a3b8; font-size: 0.8rem; margin-right: 0.25rem; }
 .preset-btn {
@@ -191,8 +157,7 @@ h2 { font-size: 1.4rem; margin-bottom: 1rem; }
 }
 .preset-btn:hover, .preset-btn:active { background: #475569; color: #f1f5f9; }
 
-/* ============ MPR Grid (desktop) ============ */
-
+/* MPR Grid */
 .mpr-grid {
   flex: 1;
   display: grid;
@@ -203,24 +168,14 @@ h2 { font-size: 1.4rem; margin-bottom: 1rem; }
   padding: 4px;
   min-height: 500px;
 }
-.mpr-cell {
-  position: relative;
-  background: #000;
-  overflow: hidden;
-}
+.mpr-cell { position: relative; background: #000; overflow: hidden; }
 .mpr-label {
   position: absolute; top: 4px; left: 8px;
-  color: rgba(255,255,255,0.6);
-  font-size: 0.75rem;
-  font-family: monospace;
-  z-index: 10;
-  pointer-events: none;
+  color: rgba(255,255,255,0.6); font-size: 0.75rem;
+  font-family: monospace; z-index: 10; pointer-events: none;
   text-shadow: 0 0 4px rgba(0,0,0,0.9);
 }
-.mpr-viewport {
-  width: 100%; height: 100%; outline: none;
-  touch-action: none;
-}
+.mpr-viewport { width: 100%; height: 100%; outline: none; touch-action: none; }
 .mpr-viewport canvas { outline: none; display: block; }
 .placeholder-viewport {
   width: 100%; height: 100%;
@@ -228,14 +183,10 @@ h2 { font-size: 1.4rem; margin-bottom: 1rem; }
   color: #475569; font-size: 0.85rem; text-align: center; line-height: 1.5;
 }
 
-/* ============ Stack viewport (mobile) ============ */
-
+/* Stack viewport (mobile) */
 .stack-container {
-  background: #000;
-  overflow: hidden;
-  flex: 1;
-  min-height: 400px;
-  position: relative;
+  background: #000; overflow: hidden; flex: 1;
+  min-height: 400px; position: relative;
 }
 .stack-viewport {
   width: 100%; height: 100%; outline: none;
@@ -243,8 +194,7 @@ h2 { font-size: 1.4rem; margin-bottom: 1rem; }
 }
 .stack-viewport canvas { outline: none; display: block; }
 
-/* ============ Overlays and slider ============ */
-
+/* Overlays */
 .viewport-overlay {
   position: absolute; top: 40px; left: 0; right: 0;
   display: flex; justify-content: space-between;
@@ -255,6 +205,7 @@ h2 { font-size: 1.4rem; margin-bottom: 1rem; }
   text-shadow: 0 0 4px rgba(0,0,0,0.9);
 }
 
+/* Slider */
 .slider-bar {
   display: flex; align-items: center; gap: 0.75rem;
   background: #1e293b; padding: 0.6rem 0.75rem; border-radius: 0 0 8px 8px;
@@ -265,20 +216,74 @@ h2 { font-size: 1.4rem; margin-bottom: 1rem; }
   min-width: 80px; text-align: right; flex-shrink: 0;
 }
 input[type='range']#sliceSlider {
-  flex: 1; height: 6px;
-  background: #334155; border-radius: 3px;
+  flex: 1; height: 6px; background: #334155; border-radius: 3px;
   outline: none; appearance: none; -webkit-appearance: none; cursor: pointer;
 }
 input[type='range']#sliceSlider::-webkit-slider-thumb {
   appearance: none; -webkit-appearance: none;
-  width: 20px; height: 20px;
-  background: #3b82f6; border-radius: 50%; cursor: pointer;
+  width: 20px; height: 20px; background: #3b82f6;
+  border-radius: 50%; cursor: pointer;
 }
 input[type='range']#sliceSlider::-moz-range-thumb {
-  width: 20px; height: 20px;
-  background: #3b82f6; border-radius: 50%;
-  cursor: pointer; border: none;
+  width: 20px; height: 20px; background: #3b82f6;
+  border-radius: 50%; cursor: pointer; border: none;
 }
+
+/* ============ Curved MPR panel ============ */
+
+.curved-mpr-panel {
+  margin-top: 1rem;
+  background: #1e293b;
+  border-radius: 8px;
+  padding: 1rem;
+}
+.cmpr-header {
+  display: flex; justify-content: space-between; align-items: center;
+  flex-wrap: wrap; gap: 0.75rem; margin-bottom: 0.75rem;
+}
+.cmpr-header h3 { font-size: 1rem; color: #f1f5f9; }
+.cmpr-controls {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+}
+.cmpr-controls button {
+  background: #2563eb; color: white; border: none;
+  padding: 0.4rem 0.9rem; border-radius: 4px; font-size: 0.85rem;
+  cursor: pointer; transition: background 0.15s;
+}
+.cmpr-controls button:hover:not(:disabled) { background: #1d4ed8; }
+.cmpr-controls button:disabled { opacity: 0.5; cursor: not-allowed; }
+.cmpr-controls button.active-btn { background: #f59e0b; }
+.cmpr-controls button.active-btn:hover { background: #d97706; }
+.cmpr-controls label {
+  color: #cbd5e1; font-size: 0.85rem;
+  display: flex; align-items: center; gap: 0.4rem;
+}
+.cmpr-controls select {
+  background: #334155; color: #f1f5f9;
+  border: 1px solid #475569; border-radius: 4px;
+  padding: 0.3rem 0.5rem; font-size: 0.85rem;
+}
+.curve-help {
+  background: #164e63; color: #67e8f9; border: 1px solid #0e7490;
+  padding: 0.5rem 0.75rem; border-radius: 4px;
+  margin-bottom: 0.75rem; font-size: 0.85rem;
+}
+.panorama-container {
+  background: #000; border-radius: 4px;
+  padding: 4px; overflow-x: auto; overflow-y: hidden;
+  min-height: 200px;
+  display: flex; align-items: center; justify-content: center;
+}
+.panorama-canvas {
+  display: block;
+  max-width: 100%;
+  image-rendering: pixelated;
+}
+.panorama-status {
+  margin-top: 0.5rem; font-size: 0.8rem;
+}
+
+.curve-overlay-canvas { pointer-events: none; }
 
 .viewer-help {
   margin-top: 0.75rem; padding: 0.75rem 1rem;
@@ -289,16 +294,13 @@ input[type='range']#sliceSlider::-moz-range-thumb {
 .viewer-help strong { color: #cbd5e1; }
 
 /* Fullscreen */
-.viewer-workspace:fullscreen, .viewer-workspace:-webkit-full-screen {
-  background: #000; padding: 0;
-}
+.viewer-workspace:fullscreen, .viewer-workspace:-webkit-full-screen { background: #000; padding: 0; }
 .viewer-workspace.pseudo-fullscreen {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
   z-index: 9999; border-radius: 0; background: #000;
 }
 
-/* ============ Mobile (portrait) ============ */
-
+/* Mobile */
 @media (max-width: 700px) {
   main { padding: 1rem 0.5rem; }
   .viewer-section { padding: 0.5rem; }
@@ -333,13 +335,11 @@ input[type='range']#sliceSlider::-moz-range-thumb {
   .tool-btn { width: 36px; height: 36px; padding: 6px; }
 }
 
-/* ============ Small desktop / tablet MPR fallback ============ */
-
 @media (max-width: 1100px) and (min-width: 701px) {
   .mpr-grid {
     grid-template-columns: 1fr;
     grid-template-rows: repeat(3, 1fr);
     min-height: 700px;
   }
-  .mpr-cell:nth-child(4) { display: none; } /* Hide 3D placeholder on small screens */
+  .mpr-cell:nth-child(4) { display: none; }
 }
