@@ -218,20 +218,13 @@ async function loadAsMPR(elements, onProgress, onSliceChange, onRender, onVolume
   }, 500);
   setTimeout(() => clearInterval(poll), 240000);
 
-  // Kick off pixel loading. .load() returns a promise that resolves when ALL slices are in.
-  volume.load(() => {
-    // Callback fires per-frame during progressive loading (not needed here — poll handles it)
-  }).then(() => {
-    // Fires once all frames loaded — belt-and-braces alongside the poll
-    clearInterval(poll);
-    if (onProgress) onProgress(total, total);
-    console.log('Volume.load() resolved, firing onVolumeReady');
-    if (onVolumeReady) {
-      try { onVolumeReady(currentVolumeId); } catch (e) { console.error('onVolumeReady error:', e); }
-    }
-  }).catch((err) => {
+  // Kick off pixel loading. In Cornerstone3D v3, volume.load() is fire-and-forget
+  // (returns undefined, not a Promise). The poll above detects completion.
+  try {
+    volume.load();
+  } catch (err) {
     console.error('volume.load() failed:', err);
-  });
+  }
 
   await setVolumesForViewports(
     renderingEngine,
