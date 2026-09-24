@@ -29,21 +29,36 @@ export function loadVolumeInfo(volumeId) {
   const volume = cache.getVolume(volumeId);
   if (!volume) throw new Error('Volume not found in cache: ' + volumeId);
 
-  const scalarData = volume.getScalarData ? volume.getScalarData() : volume.scalarData;
-  if (!scalarData) throw new Error('Volume has no scalar data yet — is it loaded?');
+  // Cornerstone3D v3+ uses voxelManager instead of getScalarData()
+  let scalarData = null;
+  try {
+    if (volume.voxelManager && typeof volume.voxelManager.getCompleteScalarDataArray === 'function') {
+      scalarData = volume.voxelManager.getCompleteScalarDataArray();
+    } else if (typeof volume.getScalarData === 'function') {
+      // Older API fallback
+      scalarData = volume.getScalarData();
+    } else if (volume.scalarData) {
+      scalarData = volume.scalarData;
+    }
+  } catch (err) {
+    console.warn('scalarData access threw:', err.message);
+  }
+  if (!scalarData || !scalarData.length) {
+    throw new Error('Volume has no scalar data yet — is it fully loaded?');
+  }
 
   cachedVolumeInfo = {
     data: scalarData,
-    dimensions: volume.dimensions,      // [width, height, depth] in voxels
-    spacing: volume.spacing,            // [sx, sy, sz] mm per voxel
-    origin: volume.origin,              // [ox, oy, oz] world coords of voxel (0,0,0)
-    direction: volume.direction || [1,0,0, 0,1,0, 0,0,1], // Row-major 3x3
+    dimensions: volume.dimensions,
+    spacing: volume.spacing,
+    origin: volume.origin,
+    direction: volume.direction || [1,0,0, 0,1,0, 0,0,1],
     min: 0,
     max: 0,
     volumeId,
   };
 
-  // Compute min/max for W/L (sample a subset for speed)
+  // Sample min/max for W/L (subset for speed)
   let mn = Infinity, mx = -Infinity;
   const stride = Math.max(1, Math.floor(scalarData.length / 100000));
   for (let i = 0; i < scalarData.length; i += stride) {
@@ -53,6 +68,12 @@ export function loadVolumeInfo(volumeId) {
   }
   cachedVolumeInfo.min = mn;
   cachedVolumeInfo.max = mx;
+  console.log('curvedMPR: volume loaded', {
+    dimensions: volume.dimensions,
+    spacing: volume.spacing,
+    dataLength: scalarData.length,
+    min: mn, max: mx,
+  });
   return cachedVolumeInfo;
 }
 
